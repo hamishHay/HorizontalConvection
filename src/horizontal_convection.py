@@ -1,5 +1,6 @@
 import numpy as np
 import dedalus.public as d3
+from dedalus.core.domain import Domain
 import logging
 logger = logging.getLogger(__name__)
 import matplotlib.pyplot as plt
@@ -38,7 +39,8 @@ def run_europa_sim(params):
     timestep =   params['timestep']
     dealias =    params['dealias']             #3/2
     stop_sim_time = params['stop_sim_time']
-    save_time =  params['save_time']         #plot every so much time 
+    snap_time =  params['snap_time']         #plot every so much time 
+    avg_time  =  params['avg_time']          #averaging timescale 
     chkp_time =  params['chkp_time']
     max_writes = params['max_writes']       #maximum number of plots
     print_step = params['print_step']       #terminal message written every so many time steps
@@ -50,6 +52,7 @@ def run_europa_sim(params):
     dist = d3.Distributor(coords, dtype=dtype)
     xbasis = d3.RealFourier(coords['x'], size=nx, bounds=(0, Lx), dealias=dealias)
     zbasis = d3.ChebyshevT(coords['z'], size=nz, bounds=(0, Lz), dealias=dealias)
+    domain = Domain(dist, (xbasis,))
     x, z = dist.local_grids(xbasis, zbasis)
     ex, ez = coords.unit_vector_fields(dist)
 
@@ -58,8 +61,26 @@ def run_europa_sim(params):
     T = dist.Field(name='T', bases=(xbasis,zbasis))
     f = dist.Field(name='f', bases=(xbasis,zbasis))
     ft = dist.Field(name='ft', bases=(xbasis,zbasis))
-    
     u = dist.VectorField(coords, name='u', bases=(xbasis,zbasis))
+
+    t = dist.Field(name="t")
+
+    # time-average diagnostics
+
+    avg_KE = dist.Field(name='avg_KE')                      # total kinetic energy
+    avg_KE0 = 0.0
+
+    avg_f_x = dist.Field(name='avg_f_x', bases=(xbasis))    # phase-topology profile
+    avg_f_x0 = np.zeros((3*nx // 2, 1))
+
+    avg_hflux_top_x = dist.Field(name='avg_hflux_top_x', bases=(xbasis))
+    avg_hflux_top_x0 = np.zeros((3*nx // 2, 1))
+
+    avg_hflux_bot_x = dist.Field(name='avg_hflux_bot_x', bases=(xbasis))
+    avg_hflux_bot_x0 = np.zeros((3*nx // 2, 1))
+
+    diags = [avg_KE, avg_f_x, avg_hflux_bot_x, avg_hflux_top_x]
+
     zf = dist.Field(name='z', bases=(xbasis,zbasis))
     zf['g'] = z
 
@@ -89,10 +110,11 @@ def run_europa_sim(params):
 
     # integral quantities
     momentum = d3.integ(u)
+    KE = d3.Average(u@u)
     heat = d3.integ(T) - S*d3.integ(f)
     vorticity = -d3.div(d3.skew(u))
     
-    Re = np.sqrt(d3.Average(u@u ('x', 'y'))
+    Re = np.sqrt(d3.Average(u@u, ('x', 'z')))
     Nu_RB = d3.Average(dz(T)(z=Lz), ('x'))
 
 
@@ -105,10 +127,10 @@ def run_europa_sim(params):
     # (d3.div(ez*lift(tau_T1)) - dz(lift(tau_T1))).evaluate()['g'].max() # 2.6/7.3 ~ .35 faster
 
     # Problem
-    problem = d3.IVP([p, u, T, f, ft,  
+    variables = [p, u, T, f, ft,  
                       tau_p, tau_T1, tau_T2, tau_f1, tau_f2, 
-                      tau_u1, tau_u2, 
-                      ], namespace=locals())
+                      tau_u1, tau_u2]
+    problem = d3.IVP(variables + diags, time=t, namespace=locals())
 
     problem.add_equation("dt(f) - ft = 0")
     problem.add_equation("div(u) + tau_div_eq = 0")
@@ -127,6 +149,13 @@ def run_europa_sim(params):
 
     problem.add_equation("integ(p) = 0") # Pressure gauge
 
+    # Averaging equations 
+    # problem.add_equation("dt(t_avg) = (Average(u@u, ('x','z')) - t_avg)/(t - t0) ")
+    problem.add_equation("dt(avg_KE) = KE")
+    problem.add_equation("dt(avg_f_x) = integ(f, ('z'))")
+    problem.add_equation("dt(avg_hflux_top_x) = heat_flux_top")
+    problem.add_equation("dt(avg_hflux_bot_x) = heat_flux_bot")
+
     # Solver
     solver = problem.build_solver(timestepper)
     solver.stop_sim_time = stop_sim_time
@@ -134,50 +163,105 @@ def run_europa_sim(params):
     f.change_scales(1)
     u.change_scales(1)
     T.change_scales(1)
+    avg_f_x.change_scales(1)
     xx, zz = x+0*z, 0*x+z
 
+    # Masks for centre--edges diagnostics
+    mask_center = (xx >= Lx/4 ) & (xx <= 3*Lx/4) 
+    mask_edges =  (xx < Lx/4) | (xx > 3*Lx/4) 
+    mask_bot_left = (xx < Lx/2) & (zz < 0.5)
+    mask_top_left = (xx < Lx/2) & (zz >= 0.5)
+
     # Initial conditions
+    mask = lambda x : 0.5*(1 + np.tanh(x/(2*ϵ)))
     f['g'] = mask(z-z0) #Initial phase field (smooth mask, liquid from 0 to z0, ice above) 
     u['g'] = 0
     T.fill_random('g', seed=42, distribution='normal', scale=2e-4) # Random noise
     T['g'] += np.heaviside(z-z0,1)*Tm*(z-1)/(z0-1) + (1-np.heaviside(z-z0,1))*(1+(Tm-1)*z/z0) #first term: in solid, second:in liquid
-
+    avg_f_x['g'] = 0.0
     # checkpoints
     checkpoints = solver.evaluator.add_file_handler(f'data/chkp-{params["sim_name"]}',
-                                                    sim_dt=chkp_time, max_writes=1, mode=file_handler_mode))
+                                                    sim_dt=chkp_time, max_writes=1, mode=file_handler_mode)
     checkpoints.add_tasks(solver.state)
 
     # Analysis
+
+
+    
     snapshots = solver.evaluator.add_file_handler(f'data/snaps-{params["sim_name"]}', 
-                                                  sim_dt=save_time, max_writes=max_writes)
+                                                  iter=snap_time, max_writes=max_writes)
     snapshots.add_task(momentum,name='momentum')
     snapshots.add_task(heat,name='heat')
 
-    snapshots.add_task(heat_flux,name='heat_flux')
+    snapshots.add_task(heat_flux_top,name='heat_flux_top')
+    snapshots.add_task(heat_flux_bot,name='heat_flux_bot')
     snapshots.add_task(vorticity, name='vorticity')
+    snapshots.add_task(KE, name='kinetic_energy')
 
-    diagnostics = solver.evaluator.add_file_handler(f'data/diags-{params["sim_name"]}', iter=100)
+    diagnostics = solver.evaluator.add_file_handler(f'data/diags-{params["sim_name"]}', iter=avg_time)
     # diagnostics.add_task(f*u@u, name='KE solid')
     # diagnostics.add_task((1-f)*u@u, name='KE liquid')
     diagnostics.add_task(d3.Integrate(f*u@u,     ('x', 'z')), name='KE solid global')
     diagnostics.add_task(d3.Integrate((1-f)*u@u, ('x', 'z')), name='KE liquid global')
     diagnostics.add_task(d3.Integrate(f, ('x', 'z')), name='f total')
 
-    # # Flow properties
-    # flow = d3.GlobalFlowProperty(solver, cadence=10)
-    # flow.add_property(np.sqrt(u@u), name='speed')
-    # flow.add_property(f, name='phase')
-    # flow.add_property(T, name='temp')
-    # #flow.add_property(C, name='conc')
-    # flow.add_property(d3.integ(f,'z'), name='depth')
+    diagnostics.add_task((avg_KE - avg_KE0)/(avg_time * timestep), name='KE avg')
 
-    # flow.add_property(f*u@u, name='KE liquid')
-    # flow.add_property((1-f)*u@u, name='KE solid')
-    # flow.add_property(d3.Integrate(f*u@u, ('x', 'y')), name='KE liquid global')
+    def array_diff_1D(*args):
+        result = args[0]['g']- args[1]
+        return result
+    
+    def ice_ocean_interface_extract(*args):
+        indx = np.argmin(abs(args[1]['g'] - 0.5), axis=1)
+        # zero_mask = np.zeros_like(f['g'])
+        # x_ind = np.arange(0, np.shape(zero_mask)[1])
+        # zero_mask[phase_mask, x_ind] = 1.0
+
+        # a[indx, np.arange(0, len(indx))]
+
+        result = args[0]['g'][np.arange(0, len(indx)), indx]
+        return np.expand_dims(result, axis=1)
+    
+    def S1(*args, domain=domain, F=array_diff_1D):
+        return d3.GeneralFunction(
+            dist=dist,
+            domain=domain,
+            tensorsig=(),
+            dtype=np.float64,
+            layout="g",
+            func=F,
+            args=args,
+        )
+
+    diagnostics.add_task(S1(avg_f_x, avg_f_x0)/(avg_time * timestep), name='f avg x')
+    diagnostics.add_task(S1(avg_hflux_top_x, avg_hflux_top_x0)/(avg_time * timestep), name='hflux top avg x')
+    diagnostics.add_task(S1(avg_hflux_bot_x, avg_hflux_bot_x0)/(avg_time * timestep), name='hflux bot avg x')
+    diagnostics.add_task(S1(dz(T), f, F=ice_ocean_interface_extract)/(avg_time * timestep), name='hflux io x')
 
     start_time = time.time()
     try:
         while solver.proceed:
+            
+            # uavg_old = d3.Average(u@u,('x', 'z')).evaluate()['g']
+            solver.step(timestep)
+            if (solver.iteration+1) % avg_time == 0:
+                avg_KE0 = avg_KE['g'][0][0]
+                
+                avg_f_x.change_scales(3/2)
+                avg_f_x0[:] = avg_f_x['g']
+
+                avg_hflux_top_x.change_scales(3/2)
+                avg_hflux_top_x0[:] = avg_hflux_top_x['g']
+
+                avg_hflux_bot_x.change_scales(3/2)
+                avg_hflux_bot_x0[:] = avg_hflux_bot_x['g']
+
+                # phase_mask = np.argmin(abs(f['g'] - 0.5), axis=1)
+                # zero_mask = np.zeros_like(f['g'])
+                # x_ind = np.arange(0, np.shape(zero_mask)[1])
+                # zero_mask[phase_mask, x_ind] = 1.0
+            
+            
             if solver.iteration % print_step == 0:
                 log = [f'it {solver.iteration:d}',
                        f'sim time {solver.sim_time:.2f}',
@@ -190,7 +274,21 @@ def run_europa_sim(params):
                 if np.isnan(np.sum(u['g'])):
                     logger.error("NaN encountered. Terminating calculations.")
                     return
-            solver.step(timestep)
+            
+            
+            # if solver.sim_time + timestep > t0['g'][0] + avg_time*timestep:
+            
+            # print(t_avg['g'] / (timestep * avg_time))
+
+            
+
+            
+
+            
+
+            
+
+                
     except:
         logger.error('Exception raised, triggering end of main loop.')
         raise       
