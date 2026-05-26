@@ -7,13 +7,13 @@ import numpy as np
 import pandas as pd
 import logging
 import sys
+sys.path.append("../src/")
 import os
 root = logging.root
 for h in root.handlers: h.setLevel("INFO") 
 logger = logging.getLogger(__name__)
-from mpi4py import MPI
-comm = MPI.COMM_WORLD
-rank, size = comm.rank, comm.size
+import horizontal_convection
+
 
 series = sys.argv[1]
 index = int(sys.argv[2])
@@ -61,25 +61,29 @@ param_list = {
     'Ra' : [1e5],#[1e4, 1e5, 1e6, 1e7],
     'Pr' : [1.],
     'S' : [1.],
-    'ε' : [2e-3], # Need to explore/read about these. 
-    'γ' : [2e-3],
+    'ε' : [2e-2], # Need to explore/read about these. 
+    'γ' : [2e-2],
     'δ' : [1e-2],
-    'β' : np.linspace(1.0,2.0, 9),#[1.51044385],
+    'β' : [1.51044385],
     'm' : [0.],
     'n' : [0.],
     'a' : [0.],
     'b' : [0.],
     'timestepper':['SBDF2'],
-    'timestep': [1e-6],
-    'stop_sim_time':[1.0],
-    'save_time':[0.01],
-    'print_step':[500],
-    'max_writes':[1000],
-    'nx':[512],
-    'nz':[512],
+    'timestep': [1e-4],
+    'stop_sim_time':[0.4],
+    'snap_time':[1],
+    'avg_time': [100],
+    'print_step':[50],
+    'max_writes':[10000],
+    'nx':[128],
+    'nz':[128],
     'dealias':[1.5],
     'save_dir': [save_dir],
-    'script':[0]
+    'script':[0],
+    'adv': [0],
+    'restart': [0],
+    'chkp_time': [1]
 }
 
 params = create_dataframe(param_list)
@@ -89,8 +93,6 @@ params['sim_name'] = ['-'.join([series,f'{i:0>3d}']) for i in params.index]
 
 params.to_csv(f'./parameters/parameters-{series}.csv')
 
-import europa
+# import europa
 
-europa.run_europa_sim(params.loc[index])
-
-europa.plot_europa_sim(params.loc[index])
+horizontal_convection.run_europa_sim(params.loc[index])
