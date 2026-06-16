@@ -76,18 +76,6 @@ def run_europa_sim(params):
             func=F,
             args=args,
         )
-    
-    def S2(*args, domain=domain2D, F=array_diff_1D):
-        return d3.GeneralFunction(
-            dist=dist,
-            domain=domain,
-            tensorsig=(coords,),
-            dtype=np.float64,
-            layout="g",
-            func=F,
-            args=args,
-        )
-    
 
     # ---------------------------------------------------------------------------------
     # ----------------------------------- Fields --------------------------------------
@@ -354,11 +342,6 @@ def run_europa_sim(params):
 
                 avg_f.change_scales(3/2)
                 avg_f0[:,:] = avg_f['g'][:,:]
-
-                # KE_ice0 = KE_ice
-                # KE_liq0 = KE_liq 
-                # KE0     = KE
-
 
             if solver.iteration % print_step == 0:
                 log = [f'it {solver.iteration:d}',
