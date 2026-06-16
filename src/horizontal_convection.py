@@ -1,12 +1,14 @@
 import numpy as np
 import dedalus.public as d3
 from dedalus.core.domain import Domain
+from dedalus.core.operators import UnaryGridFunction
 import logging
 logger = logging.getLogger(__name__)
 import matplotlib.pyplot as plt
 import time
 import glob
 import h5py
+from diagnostics import array_diff_1D, array_diff_2D, custom_grid_function, ice_ocean_interface_extract
 
 def run_europa_sim(params):
     # Model parameters
@@ -52,11 +54,44 @@ def run_europa_sim(params):
     dist = d3.Distributor(coords, dtype=dtype)
     xbasis = d3.RealFourier(coords['x'], size=nx, bounds=(0, Lx), dealias=dealias)
     zbasis = d3.ChebyshevT(coords['z'], size=nz, bounds=(0, Lz), dealias=dealias)
-    domain = Domain(dist, (xbasis,))
+    domain1D = Domain(dist, (xbasis,))
+    domain2D = Domain(dist, (xbasis, zbasis))
+    domain0D = Domain(dist, bases=())
     x, z = dist.local_grids(xbasis, zbasis)
     ex, ez = coords.unit_vector_fields(dist)
 
-    # Fields
+    # Substitutions
+    lift_basis = zbasis.derivative_basis(1)
+    lift = lambda A: d3.Lift(A, lift_basis, -1)
+    dz = lambda A: d3.Differentiate(A,coords['z'])
+    dx = lambda A: d3.Differentiate(A,coords['x'])
+
+    def S1(*args, domain=domain1D, F=array_diff_1D, ten=()):
+        return d3.GeneralFunction(
+            dist=dist,
+            domain=domain,
+            tensorsig=ten,
+            dtype=np.float64,
+            layout="g",
+            func=F,
+            args=args,
+        )
+    
+    def S2(*args, domain=domain2D, F=array_diff_1D):
+        return d3.GeneralFunction(
+            dist=dist,
+            domain=domain,
+            tensorsig=(coords,),
+            dtype=np.float64,
+            layout="g",
+            func=F,
+            args=args,
+        )
+    
+
+    # ---------------------------------------------------------------------------------
+    # ----------------------------------- Fields --------------------------------------
+    # ---------------------------------------------------------------------------------
     p = dist.Field(name='p', bases=(xbasis,zbasis))
     T = dist.Field(name='T', bases=(xbasis,zbasis))
     f = dist.Field(name='f', bases=(xbasis,zbasis))
@@ -65,21 +100,79 @@ def run_europa_sim(params):
 
     t = dist.Field(name="t")
 
-    # time-average diagnostics
+    # ---------------------------------------------------------------------------------
+    # ------------------------- diagnostic quantities ---------------------------------
+    # ---------------------------------------------------------------------------------
+
+    V_liq = d3.integ(1-f)
+    V_ice = d3.integ(f) # Volume of ice = total volume - volume of liquid
+
+    KE = d3.Average(u@u)
+    KE_ice = d3.integ(u@u * f) / V_ice
+    KE_liq = d3.integ(u@u * (1-f)) / V_liq
+
+    # heat = d3.integ(T) - S*d3.integ(f)
+    vorticity = -d3.div(d3.skew(u))
+
+    Re_liq = d3.integ(np.sqrt(u@u) * (1-f), ('x', 'z')) / V_liq
+    Nu_RB = d3.Average(dz(T)(z=Lz), ('x'))
+    f_profile = d3.Average(f, ('z'))
+    # Nu_RB = d3.Average(dz(T)(z=Lz), ('x'))
+
+    # boundary quantities
+    heat_flux_top = dz(T)(z=Lz) 
+    heat_flux_bot = dz(T)(z=0)
+
+    # ---------------------------------------------------------------------------------
+    # ------------------------ time-average diagnostics -------------------------------
+    # ---------------------------------------------------------------------------------
+
 
     avg_KE = dist.Field(name='avg_KE')                      # total kinetic energy
-    avg_KE0 = 0.0
+    avg_KE0 = np.zeros((1,1))
+
+    avg_KE_ice = dist.Field(name='avg_KE_ice')              # total kinetic energy
+    avg_KE_ice0 = np.zeros((1,1))
+
+    avg_KE_liq = dist.Field(name='avg_KE_liq')              # total kinetic energy
+    avg_KE_liq0 = np.zeros((1,1))
 
     avg_f_x = dist.Field(name='avg_f_x', bases=(xbasis))    # phase-topology profile
     avg_f_x0 = np.zeros((3*nx // 2, 1))
 
-    avg_hflux_top_x = dist.Field(name='avg_hflux_top_x', bases=(xbasis))
-    avg_hflux_top_x0 = np.zeros((3*nx // 2, 1))
+    avg_dTdz_t_x = dist.Field(name='avg_dTdz_t_x', bases=(xbasis))  # heat flux top
+    avg_dTdz_t_x0 = np.zeros((3*nx // 2, 1))
 
-    avg_hflux_bot_x = dist.Field(name='avg_hflux_bot_x', bases=(xbasis))
-    avg_hflux_bot_x0 = np.zeros((3*nx // 2, 1))
+    avg_dTdz_b_x = dist.Field(name='avg_dTdz_b_x', bases=(xbasis))  # heat flux bot
+    avg_dTdz_b_x0 = np.zeros((3*nx // 2, 1))
 
-    diags = [avg_KE, avg_f_x, avg_hflux_bot_x, avg_hflux_top_x]
+    avg_Nu = dist.Field(name='Nu')          # Nusselt number at the top 
+    avg_Nu0 = np.zeros((1,1))
+
+    # avg_Nu_io = dist.Field(name='Nu_io')    # Nusselt number at the ocean--ocean interface
+    # avg_Nu_io0 = 0.0
+
+    avg_Re = dist.Field(name="Re")          # Reynolds number in the liquid
+    avg_Re0 = np.zeros((1,1))
+
+    avg_u = dist.VectorField(coords, name='avg_u', bases=(xbasis,zbasis), dtype=dtype)
+    avg_u0 = np.zeros((2, 3*nx // 2, 3*nz // 2), dtype=dtype)
+
+    avg_T = dist.Field(name="avg_T", bases=(xbasis,zbasis))
+    avg_T0 = np.zeros((3*nx // 2, 3*nz // 2))
+
+    avg_f = dist.Field(name="avg_f", bases=(xbasis,zbasis))
+    avg_f0 = np.zeros((3*nx // 2, 3*nz // 2))
+
+
+    diags = [avg_KE, avg_f_x, avg_dTdz_b_x, avg_dTdz_t_x, avg_Nu, avg_Re, avg_KE_ice, avg_KE_liq, avg_u, avg_T, avg_f]
+
+    # ---------------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------------
+
+    # integral quantities
+    
+
 
     zf = dist.Field(name='z', bases=(xbasis,zbasis))
     zf['g'] = z
@@ -97,30 +190,12 @@ def run_europa_sim(params):
     tau_u1 = dist.VectorField(coords, name='tau_u1', bases=xbasis)
     tau_u2 = dist.VectorField(coords, name='tau_u2', bases=xbasis)
 
-    # Substitutions
-    lift_basis = zbasis.derivative_basis(1)
-    lift = lambda A: d3.Lift(A, lift_basis, -1)
-    dz = lambda A: d3.Differentiate(A,coords['z'])
-    dx = lambda A: d3.Differentiate(A,coords['x'])
+    
 
     tau_div_eq  = ez@lift(tau_u1) + tau_p
     tau_temp_eq = -dz(lift(tau_T1)) + lift(tau_T2)
     tau_phas_eq = -γ*dz(lift(tau_f1)) + lift(tau_f2)
     tau_mom_eq  = -dz(lift(tau_u1)) + lift(tau_u2)
-
-    # integral quantities
-    momentum = d3.integ(u)
-    KE = d3.Average(u@u)
-    heat = d3.integ(T) - S*d3.integ(f)
-    vorticity = -d3.div(d3.skew(u))
-    
-    Re = np.sqrt(d3.Average(u@u, ('x', 'z')))
-    Nu_RB = d3.Average(dz(T)(z=Lz), ('x'))
-
-
-    # boundary quantities
-    heat_flux_top = dz(T)(z=Lz) 
-    heat_flux_bot = dz(T)(z=0)
 
     # simpler reformulation of the tau terms
     # (d3.trace(ez*lift(tau_u1)) - ez@lift(tau_u1)).evaluate()['g'].max() # .6 faster
@@ -132,29 +207,49 @@ def run_europa_sim(params):
                       tau_u1, tau_u2]
     problem = d3.IVP(variables + diags, time=t, namespace=locals())
 
+    # ---------------------------------------------------------------------------------
+    # ---------------------------- Problem equations ----------------------------------
+    # ---------------------------------------------------------------------------------
+
     problem.add_equation("dt(f) - ft = 0")
     problem.add_equation("div(u) + tau_div_eq = 0")
     problem.add_equation("dt(T) - div(grad(T)) - S*dt(f)              + tau_temp_eq = - (1-f*adv)*u@grad(T) + T*u@grad(f)*adv")
     problem.add_equation("(5/6)*S*dt(f) - γ*div(grad(f))        + tau_phas_eq = -ϵ**(-2)*f*(1-f)*(γ*(1-2*f) + (T-Tm-a*(zf-z0)))")
     problem.add_equation("dt(u)/Pr - div(grad(u)) + grad(p) -Ra*T*ez + tau_mom_eq  = - u@grad(u)/Pr - (1/(ϵ*β)**2)*f*u")
 
-    # Boundary conditions
+    # ---------------------------------------------------------------------------------
+    # ---------------------------- Boundary conditions --------------------------------
+    # ---------------------------------------------------------------------------------
+
+    # domain top
     problem.add_equation("T(z=Lz) = 0")
     problem.add_equation("u(z=Lz) = 0")
     problem.add_equation("f(z=Lz) = 1")
     
+    # domain bottom
     problem.add_equation("T(z=0) = T_bot")
     problem.add_equation("u(z=0) = 0")
     problem.add_equation("f(z=0) = 0")
 
     problem.add_equation("integ(p) = 0") # Pressure gauge
 
-    # Averaging equations 
-    # problem.add_equation("dt(t_avg) = (Average(u@u, ('x','z')) - t_avg)/(t - t0) ")
-    problem.add_equation("dt(avg_KE) = KE")
-    problem.add_equation("dt(avg_f_x) = integ(f, ('z'))")
-    problem.add_equation("dt(avg_hflux_top_x) = heat_flux_top")
-    problem.add_equation("dt(avg_hflux_bot_x) = heat_flux_bot")
+    # ---------------------------------------------------------------------------------
+    # -------------------------- Time-averaging equations -----------------------------
+    # ---------------------------------------------------------------------------------
+
+    problem.add_equation("dt(avg_KE)       = KE")
+    problem.add_equation("dt(avg_KE_ice)   = KE_ice")
+    problem.add_equation("dt(avg_KE_liq)   = KE_liq")
+    problem.add_equation("dt(avg_f_x)      = f_profile")
+    problem.add_equation("dt(avg_dTdz_t_x) = heat_flux_top")
+    problem.add_equation("dt(avg_dTdz_b_x) = heat_flux_bot")
+
+    problem.add_equation("dt(avg_Nu) = Nu_RB")
+    problem.add_equation("dt(avg_Re) = Re_liq")
+
+    problem.add_equation("dt(avg_u) - u = 0")
+    problem.add_equation("dt(avg_T) - T = 0")
+    problem.add_equation("dt(avg_f) - f = 0")
 
     # Solver
     solver = problem.build_solver(timestepper)
@@ -179,89 +274,92 @@ def run_europa_sim(params):
     T.fill_random('g', seed=42, distribution='normal', scale=2e-4) # Random noise
     T['g'] += np.heaviside(z-z0,1)*Tm*(z-1)/(z0-1) + (1-np.heaviside(z-z0,1))*(1+(Tm-1)*z/z0) #first term: in solid, second:in liquid
     avg_f_x['g'] = 0.0
+    
     # checkpoints
     checkpoints = solver.evaluator.add_file_handler(f'data/chkp-{params["sim_name"]}',
                                                     sim_dt=chkp_time, max_writes=1, mode=file_handler_mode)
     checkpoints.add_tasks(solver.state)
 
     # Analysis
-
-
-    
-    snapshots = solver.evaluator.add_file_handler(f'data/snaps-{params["sim_name"]}', 
+    # 2D snapshots 
+    snapshots = solver.evaluator.add_file_handler(f'data/snaps2D-{params["sim_name"]}', 
                                                   iter=snap_time, max_writes=max_writes)
-    snapshots.add_task(momentum,name='momentum')
-    snapshots.add_task(heat,name='heat')
 
-    snapshots.add_task(heat_flux_top,name='heat_flux_top')
-    snapshots.add_task(heat_flux_bot,name='heat_flux_bot')
     snapshots.add_task(vorticity, name='vorticity')
-    snapshots.add_task(KE, name='kinetic_energy')
+    snapshots.add_task(u, name='velocity')
+    snapshots.add_task(f, name='phase')
+    snapshots.add_task(T, name='temperature')
 
-    diagnostics = solver.evaluator.add_file_handler(f'data/diags-{params["sim_name"]}', iter=avg_time)
-    # diagnostics.add_task(f*u@u, name='KE solid')
-    # diagnostics.add_task((1-f)*u@u, name='KE liquid')
-    diagnostics.add_task(d3.Integrate(f*u@u,     ('x', 'z')), name='KE solid global')
-    diagnostics.add_task(d3.Integrate((1-f)*u@u, ('x', 'z')), name='KE liquid global')
-    diagnostics.add_task(d3.Integrate(f, ('x', 'z')), name='f total')
+    # 0D and 1D snapshots of space-integral quantities
+    snapshots_integ = solver.evaluator.add_file_handler(f'data/snaps-{params["sim_name"]}', 
+                                                  iter=snap_time, max_writes=max_writes)
 
-    diagnostics.add_task((avg_KE - avg_KE0)/(avg_time * timestep), name='KE avg')
+    snapshots_integ.add_task(heat_flux_top, name='heat flux top x')
+    snapshots_integ.add_task(heat_flux_bot, name='heat flux bot x')
+    snapshots_integ.add_task(f_profile,     name='f x')
+    snapshots_integ.add_task(V_ice,         name='vol ice')
+    snapshots_integ.add_task(V_liq,         name='vol liq')
+    snapshots_integ.add_task(KE_ice,        name='KE ice')
+    snapshots_integ.add_task(KE,            name='KE')
+    snapshots_integ.add_task(KE_liq,        name='KE liq')
+    snapshots_integ.add_task(Nu_RB,         name='Nu')
 
-    def array_diff_1D(*args):
-        result = args[0]['g']- args[1]
-        return result
-    
-    def ice_ocean_interface_extract(*args):
-        indx = np.argmin(abs(args[1]['g'] - 0.5), axis=1)
-        # zero_mask = np.zeros_like(f['g'])
-        # x_ind = np.arange(0, np.shape(zero_mask)[1])
-        # zero_mask[phase_mask, x_ind] = 1.0
+    int_time = (avg_time-1) * timestep # The -1 is important! 
 
-        # a[indx, np.arange(0, len(indx))]
+    tavg = solver.evaluator.add_file_handler(f'data/diags2D-{params["sim_name"]}', iter=avg_time)
+    tavg.add_task(S1(avg_u, avg_u0, domain=domain2D, ten=(coords,))/int_time, name='velocity avg')
+    tavg.add_task(S1(avg_T, avg_T0, domain=domain2D)/int_time, name='temperature avg')
+    tavg.add_task(S1(avg_f, avg_f0, domain=domain2D)/int_time, name='phase avg')
 
-        result = args[0]['g'][np.arange(0, len(indx)), indx]
-        return np.expand_dims(result, axis=1)
-    
-    def S1(*args, domain=domain, F=array_diff_1D):
-        return d3.GeneralFunction(
-            dist=dist,
-            domain=domain,
-            tensorsig=(),
-            dtype=np.float64,
-            layout="g",
-            func=F,
-            args=args,
-        )
+    tavg_integ = solver.evaluator.add_file_handler(f'data/diags-{params["sim_name"]}', iter=avg_time)
+    tavg_integ.add_task(S1(avg_KE,     avg_KE0,     domain=domain0D)/int_time, name='KE avg')
+    tavg_integ.add_task(S1(avg_KE_ice, avg_KE_ice0, domain=domain0D)/int_time, name='KE avg ice')
+    tavg_integ.add_task(S1(avg_KE_liq, avg_KE_liq0, domain=domain0D)/int_time, name='KE avg liq')
+    tavg_integ.add_task(S1(avg_Nu,     avg_Nu0,     domain=domain0D)/int_time, name='Nu avg')
+    tavg_integ.add_task(S1(avg_Re,     avg_Re0,     domain=domain0D)/int_time, name='Re avg')
 
-    diagnostics.add_task(S1(avg_f_x, avg_f_x0)/(avg_time * timestep), name='f avg x')
-    diagnostics.add_task(S1(avg_hflux_top_x, avg_hflux_top_x0)/(avg_time * timestep), name='hflux top avg x')
-    diagnostics.add_task(S1(avg_hflux_bot_x, avg_hflux_bot_x0)/(avg_time * timestep), name='hflux bot avg x')
-    diagnostics.add_task(S1(dz(T), f, F=ice_ocean_interface_extract)/(avg_time * timestep), name='hflux io x')
+    tavg_integ.add_task(S1(avg_f_x,      avg_f_x0)/int_time, name='f avg x')
+    tavg_integ.add_task(S1(avg_dTdz_t_x, avg_dTdz_t_x0)/int_time, name='heat flux top avg x')
+    tavg_integ.add_task(S1(avg_dTdz_b_x, avg_dTdz_b_x0)/int_time, name='heat flux bot avg x')
+    # diagnostics.add_task(S1(dz(T), f, F=ice_ocean_interface_extract)/int_time, name='dTdz io x')
 
     start_time = time.time()
     try:
         while solver.proceed:
-            
-            # uavg_old = d3.Average(u@u,('x', 'z')).evaluate()['g']
             solver.step(timestep)
-            if (solver.iteration+1) % avg_time == 0:
-                avg_KE0 = avg_KE['g'][0][0]
+            if (solver.iteration-1) % avg_time == 0:   
+                # Reset variables for averaging 
+                avg_KE0[:,:] = avg_KE['g']
+                avg_KE_ice0[:,:] = avg_KE_ice['g']
+                avg_KE_liq0[:,:] = avg_KE_liq['g']
+
+                avg_Nu0[:,:] = avg_Nu['g']
+                avg_Re0[:,:] = avg_Re['g']
                 
                 avg_f_x.change_scales(3/2)
                 avg_f_x0[:] = avg_f_x['g']
 
-                avg_hflux_top_x.change_scales(3/2)
-                avg_hflux_top_x0[:] = avg_hflux_top_x['g']
+                avg_dTdz_t_x.change_scales(3/2)
+                avg_dTdz_t_x0[:] = avg_dTdz_t_x['g']
 
-                avg_hflux_bot_x.change_scales(3/2)
-                avg_hflux_bot_x0[:] = avg_hflux_bot_x['g']
+                avg_dTdz_b_x.change_scales(3/2)
+                avg_dTdz_b_x0[:] = avg_dTdz_b_x['g']
 
-                # phase_mask = np.argmin(abs(f['g'] - 0.5), axis=1)
-                # zero_mask = np.zeros_like(f['g'])
-                # x_ind = np.arange(0, np.shape(zero_mask)[1])
-                # zero_mask[phase_mask, x_ind] = 1.0
-            
-            
+                avg_u.change_scales(3/2)
+                avg_u0[:, :, :] = avg_u['g']
+
+                avg_T.change_scales(3/2)
+                # print(avg_T0[:,:])
+                avg_T0[:,:] = avg_T['g']
+
+                avg_f.change_scales(3/2)
+                avg_f0[:,:] = avg_f['g'][:,:]
+
+                # KE_ice0 = KE_ice
+                # KE_liq0 = KE_liq 
+                # KE0     = KE
+
+
             if solver.iteration % print_step == 0:
                 log = [f'it {solver.iteration:d}',
                        f'sim time {solver.sim_time:.2f}',
@@ -275,53 +373,6 @@ def run_europa_sim(params):
                     logger.error("NaN encountered. Terminating calculations.")
                     return
             
-            
-            # if solver.sim_time + timestep > t0['g'][0] + avg_time*timestep:
-            
-            # print(t_avg['g'] / (timestep * avg_time))
-
-            
-
-            
-
-            
-
-            
-
-                
     except:
         logger.error('Exception raised, triggering end of main loop.')
         raise       
-
-import file_tools as flt
-
-def plot_europa_sim(params):
-
-    Lx, Lz = params['Lx'], params['Lz']#1, 1 # domain size
-
-    data_files = sorted(glob.glob(f'data/snapshots-{params["sim_name"]}/*.h5'))
-    plot_dir = f'plots/{params["sim_name"]}'
-    flt.makedir(plot_dir)
-    
-    with h5py.File(data_files[0], 'r') as f:
-        u, T, φ = [f['tasks'][name][:] for name in ['u','T','f']]
-        t, x, z = [f['tasks']['u'].dims[i][n][:] for i, n in [(0,'sim_time'),(2,'x'),(3,'z')]]
-    
-    xx, zz = np.meshgrid(x, z, indexing='ij')
-
-    for it in range(len(t)):
-        fig, ax = plt.subplots(3,1,figsize=(3*Lx, 15))
-        ps = {}
-        ps[0,0] = ax[0].pcolormesh(xx, zz, T[it], cmap='RdBu_r')
-        #ps[1,0] = ax[1,0].pcolormesh(xx, zz, C[it], cmap='Purples')
-        ps[1,0] = ax[1].pcolormesh(xx, zz, u[it][0], cmap='RdBu_r')
-        ps[2,0] = ax[2].pcolormesh(xx, zz, u[it][1], cmap='RdBu_r')
-        for i in range(3):
-                ax[i].contour(xx,zz,φ[it],[.05,.5,.95],colors='k', linewidths=0.5)
-                plt.colorbar(ps[i,0], ax=ax[i])    
-
-        ax[0].set_ylabel("Temperature")
-        ax[1].set_ylabel("Velocity x")
-        ax[2].set_ylabel("Velocity y")
-        plt.savefig(f'{plot_dir}/step-{it:0>3d}.png',bbox_inches='tight')
-
