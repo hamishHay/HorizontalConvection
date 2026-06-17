@@ -10,7 +10,7 @@ import glob
 import h5py
 from diagnostics import array_diff_1D, array_diff_2D, custom_grid_function, ice_ocean_interface_extract
 
-def run_europa_sim(params):
+def run_horizontal_conv_sim(params):
     # Model parameters
     Lx, Lz = params['Lx'], params['Lz'] # domain size
     Tm = params['Tm'] # melt temperature
@@ -30,11 +30,10 @@ def run_europa_sim(params):
     δ = params['δ'] # concentration forcing regularisation
     adv = params['adv']
 
-    restart = params['restart']
-
     file_handler_mode = 'overwrite'
-    if restart > 0:
-        file_handler_mode = 'append'
+    restart = params['restart']
+    save_dir = params['save_dir']
+
 
     # Numerical parameters
     nx, nz =     params['nx'], params['nz']
@@ -255,23 +254,30 @@ def run_europa_sim(params):
     mask_bot_left = (xx < Lx/2) & (zz < 0.5)
     mask_top_left = (xx < Lx/2) & (zz >= 0.5)
 
-    # Initial conditions
-    mask = lambda x : 0.5*(1 + np.tanh(x/(2*ϵ)))
-    f['g'] = mask(z-z0) #Initial phase field (smooth mask, liquid from 0 to z0, ice above) 
-    u['g'] = 0
-    T.fill_random('g', seed=42, distribution='normal', scale=2e-4) # Random noise
-    T['g'] += np.heaviside(z-z0,1)*Tm*(z-1)/(z0-1) + (1-np.heaviside(z-z0,1))*(1+(Tm-1)*z/z0) #first term: in solid, second:in liquid
-    avg_f_x['g'] = 0.0
+    # ---------------------------------------------------------------------------------
+    # ----------------------------- Initial conditions --------------------------------
+    # ---------------------------------------------------------------------------------
+
+    if restart <= 0:
+        mask = lambda x : 0.5*(1 + np.tanh(x/(2*ϵ)))
+        f['g'] = mask(z-z0) #Initial phase field (smooth mask, liquid from 0 to z0, ice above) 
+        u['g'] = 0
+        T.fill_random('g', seed=42, distribution='normal', scale=2e-4) # Random noise
+        T['g'] += np.heaviside(z-z0,1)*Tm*(z-1)/(z0-1) + (1-np.heaviside(z-z0,1))*(1+(Tm-1)*z/z0) #first term: in solid, second:in liquid
+        avg_f_x['g'] = 0.0
+    else:
+        write, initial_timestep = solver.load_state(f'{params["save_dir"]}/chkp/'+'chkp_s{:1d}.h5'.format(restart))
+        file_handler_mode = 'append'
     
     # checkpoints
-    checkpoints = solver.evaluator.add_file_handler(f'data/chkp-{params["sim_name"]}',
-                                                    sim_dt=chkp_time, max_writes=1, mode=file_handler_mode)
+    checkpoints = solver.evaluator.add_file_handler(f'{params["save_dir"]}/chkp',
+                                                    iter=chkp_time, max_writes=1, mode=file_handler_mode)
     checkpoints.add_tasks(solver.state)
 
     # Analysis
     # 2D snapshots 
-    snapshots = solver.evaluator.add_file_handler(f'data/snaps2D-{params["sim_name"]}', 
-                                                  iter=snap_time, max_writes=max_writes)
+    snapshots = solver.evaluator.add_file_handler(f'{params["save_dir"]}/snaps2D', 
+                                                  iter=snap_time, max_writes=max_writes, mode=file_handler_mode)
 
     snapshots.add_task(vorticity, name='vorticity')
     snapshots.add_task(u, name='velocity')
@@ -279,8 +285,8 @@ def run_europa_sim(params):
     snapshots.add_task(T, name='temperature')
 
     # 0D and 1D snapshots of space-integral quantities
-    snapshots_integ = solver.evaluator.add_file_handler(f'data/snaps-{params["sim_name"]}', 
-                                                  iter=snap_time, max_writes=max_writes)
+    snapshots_integ = solver.evaluator.add_file_handler(f'{params["save_dir"]}/snaps', 
+                                                  iter=snap_time, max_writes=max_writes, mode=file_handler_mode)
 
     snapshots_integ.add_task(heat_flux_top, name='heat flux top x')
     snapshots_integ.add_task(heat_flux_bot, name='heat flux bot x')
@@ -294,12 +300,12 @@ def run_europa_sim(params):
 
     int_time = (avg_time-1) * timestep # The -1 is important! 
 
-    tavg = solver.evaluator.add_file_handler(f'data/diags2D-{params["sim_name"]}', iter=avg_time)
+    tavg = solver.evaluator.add_file_handler(f'{params["save_dir"]}/diags2D', iter=avg_time, mode=file_handler_mode)
     tavg.add_task(S1(avg_u, avg_u0, domain=domain2D, ten=(coords,))/int_time, name='velocity avg')
     tavg.add_task(S1(avg_T, avg_T0, domain=domain2D)/int_time, name='temperature avg')
     tavg.add_task(S1(avg_f, avg_f0, domain=domain2D)/int_time, name='phase avg')
 
-    tavg_integ = solver.evaluator.add_file_handler(f'data/diags-{params["sim_name"]}', iter=avg_time)
+    tavg_integ = solver.evaluator.add_file_handler(f'{params["save_dir"]}/diags', iter=avg_time, mode=file_handler_mode)
     tavg_integ.add_task(S1(avg_KE,     avg_KE0,     domain=domain0D)/int_time, name='KE avg')
     tavg_integ.add_task(S1(avg_KE_ice, avg_KE_ice0, domain=domain0D)/int_time, name='KE avg ice')
     tavg_integ.add_task(S1(avg_KE_liq, avg_KE_liq0, domain=domain0D)/int_time, name='KE avg liq')
