@@ -71,9 +71,9 @@ param_list = {
     'b' : [0.],
     'timestepper':['SBDF2'],
     'timestep': [1e-4],
-    'stop_sim_time':[0.4],
-    'snap_time':[1],
-    'avg_time': [100],
+    'stop_sim_time':[0.4, 0.4],
+    'snap_time':[100],
+    'avg_time': [500],
     'print_step':[50],
     'max_writes':[10000],
     'nx':[128],
@@ -83,16 +83,23 @@ param_list = {
     'script':[0],
     'adv': [0],
     'restart': [0],
-    'chkp_time': [1]
+    'chkp_time': [1000]
 }
 
 params = create_dataframe(param_list)
 params['sim_name'] = ['-'.join([series,f'{i:0>3d}']) for i in params.index]
+params['sim_index'] = [f'{i:0>3d}' for i in params.index]
+params['sim_suite'] = [series for i in params.index]
+params['save_dir'] = ["data/{:s}/{:s}".format(params.loc[i]['sim_suite'], params.loc[i]['sim_index']) for i in params.index]
+
 # series_restart = 'ch-3D-comparison-1'
 # params['restart_file'] = [last_save_file(f'{series_restart}-{i:0>3d}') for i in range(len(params))]
 
 params.to_csv(f'./parameters/parameters-{series}.csv')
 
-# import europa
+sim_dir = params.loc[index]['save_dir']
 
-horizontal_convection.run_europa_sim(params.loc[index])
+if not os.path.isdir(sim_dir):
+    os.makedirs(sim_dir)
+
+horizontal_convection.run_horizontal_conv_sim(params.loc[index])
