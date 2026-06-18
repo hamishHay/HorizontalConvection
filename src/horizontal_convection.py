@@ -176,6 +176,12 @@ def run_horizontal_conv_sim(params):
     avg_dTdz = dist.Field(name='avg_dTdz')                          # volume avg dTdz in the liquid
     avg_dTdz0 = np.zeros((1,1))
 
+    avg_dTdz_t = dist.Field(name='avg_dTdz_t')                      # horizontal and time avg dTdz top
+    avg_dTdz_t0 = np.zeros((1,1))
+
+    avg_dTdz_b = dist.Field(name='avg_dTdz_b')                      # horizontal and time avg dTdz bot
+    avg_dTdz_b0 = np.zeros((1,1))
+
     avg_Re = dist.Field(name="Re")                                  # volume avg Reynolds number in the liquid
     avg_Re0 = np.zeros((1,1))
 
@@ -210,9 +216,11 @@ def run_horizontal_conv_sim(params):
                                     bases=(xbasis))
     avg_gradT_io0 = np.zeros((2, 3*nx // 2, 1), dtype=dtype)
 
+    avg_Tdiff =  dist.Field(name='avg_T_diff')                      # average temp difference between domain center and edges 
+    avg_Tdiff0 = np.zeros((1, 1))
 
     diags = [avg_KE, avg_f_x, avg_dTdz_b_x, avg_dTdz_t_x, avg_Nu, avg_Re, avg_KE_ice, avg_KE_liq, avg_u, avg_T, avg_f,
-             avg_dTdz, avg_dTdz_in, avg_dTdz_out, int_u_top_left, avg_gradT, avg_uT, avg_gradT_io]
+             avg_dTdz, avg_dTdz_in, avg_dTdz_out, int_u_top_left, avg_gradT, avg_uT, avg_gradT_io, avg_dTdz_b, avg_dTdz_t, avg_Tdiff]
 
     # ---------------------------------------------------------------------------------
     # ---------------------------------------------------------------------------------
@@ -291,6 +299,9 @@ def run_horizontal_conv_sim(params):
     problem.add_equation("dt(avg_dTdz_t_x) = heat_flux_top")
     problem.add_equation("dt(avg_dTdz_b_x) = heat_flux_bot")
 
+    problem.add_equation("dt(avg_dTdz_t) = integ(heat_flux_top, 'x')")      # Integral to get total heat
+    problem.add_equation("dt(avg_dTdz_b) = integ(heat_flux_bot, 'x')")
+
     problem.add_equation("dt(avg_Nu) = Nu_RB")
     problem.add_equation("dt(avg_Re) = Re_liq")
     problem.add_equation("dt(avg_dTdz) = dTdz")
@@ -304,6 +315,7 @@ def run_horizontal_conv_sim(params):
     problem.add_equation("dt(avg_gradT) - grad(T) = 0 " )
     problem.add_equation("dt(avg_gradT_io) = S3(grad(T), f) " )
     problem.add_equation("dt(avg_uT)      = u*T")
+    problem.add_equation("dt(avg_Tdiff) = integ(S2(T, mask_center)) - integ(S2(T, mask_edges))" )
 
     problem.add_equation("dt(int_u_top_left) =  integ(S2(u@ex, mask_top_left))" )
 
@@ -330,8 +342,8 @@ def run_horizontal_conv_sim(params):
         k = 2*np.pi / Lx 
         T['g'] += np.heaviside(z-z0, 1)*Tm*(z-1)/(z0-1) # Temperature in the ice 
         T['g'] += (1-np.heaviside(z-z0,1))*(1 + (Tm-1)*z/z0 
-                                            - b*np.sinh(k*(z0-z)) / np.sinh(k *z0) * np.cos(k*x) ) #first term: in solid, second:in liquid
-        avg_f_x['g'] = 0.0
+                                            - b*np.sinh(k*(z0-z)) / np.sinh(k *z0) * np.cos(k*x) ) # Temperature in the liquid
+
     else:
         write, initial_timestep = solver.load_state(f'{params["save_dir"]}/chkp/'+'chkp_s{:1d}.h5'.format(restart))
         file_handler_mode = 'append'
@@ -386,11 +398,14 @@ def run_horizontal_conv_sim(params):
     tavg_integ.add_task(S1(avg_Nu,           avg_Nu0,           domain=domain0D)/int_time, name='Nu avg')
     tavg_integ.add_task(S1(avg_Re,           avg_Re0,           domain=domain0D)/int_time, name='Re avg')
     tavg_integ.add_task(S1(avg_dTdz,         avg_dTdz0,         domain=domain0D)/int_time, name='dTdz avg')
+    tavg_integ.add_task(S1(avg_dTdz_t,       avg_dTdz_t0,       domain=domain0D)/int_time, name='dTdz avg t')
+    tavg_integ.add_task(S1(avg_dTdz_b,       avg_dTdz_b0,       domain=domain0D)/int_time, name='dTdz avg b')
     tavg_integ.add_task(S1(int_u_top_left,   int_u_top_left0,   domain=domain0D)/int_time, name='u top left int')
+    tavg_integ.add_task(S1(avg_Tdiff,        avg_Tdiff0,       domain=domain0D)/int_time, name='T diff avg')
 
-    tavg_integ.add_task(S1(avg_f_x,      avg_f_x0)/int_time, name='f avg x')
-    tavg_integ.add_task(S1(avg_dTdz_t_x, avg_dTdz_t_x0)/int_time, name='heat flux top avg x')
-    tavg_integ.add_task(S1(avg_dTdz_b_x, avg_dTdz_b_x0)/int_time, name='heat flux bot avg x')
+    tavg_integ.add_task(S1(avg_f_x,      avg_f_x0)/int_time,        name='f avg x')
+    tavg_integ.add_task(S1(avg_dTdz_t_x, avg_dTdz_t_x0)/int_time,   name='heat flux top avg x')
+    tavg_integ.add_task(S1(avg_dTdz_b_x, avg_dTdz_b_x0)/int_time,   name='heat flux bot avg x')
 
     tavg_integ.add_task(S1(avg_dTdz_out, avg_dTdz_out0, domain=domain1D_z)/int_time, name='dTdz avg out')
     tavg_integ.add_task(S1(avg_dTdz_in,  avg_dTdz_in0,  domain=domain1D_z)/int_time, name='dTdz avg in')
@@ -410,6 +425,11 @@ def run_horizontal_conv_sim(params):
                 avg_KE0[:,:] = avg_KE['g']
                 avg_KE_ice0[:,:] = avg_KE_ice['g']
                 avg_KE_liq0[:,:] = avg_KE_liq['g']
+
+                avg_dTdz_t0[:,:] = avg_dTdz_t['g']
+                avg_dTdz_b0[:,:] = avg_dTdz_b['g']
+
+                avg_Tdiff0[:,:] = avg_Tdiff['g']
 
                 avg_Nu0[:,:]   = avg_Nu['g']
                 avg_Re0[:,:]   = avg_Re['g']
