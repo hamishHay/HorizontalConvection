@@ -40,7 +40,8 @@ def run_horizontal_conv_sim(params):
     timestep =   params['timestep']
     dealias =    params['dealias']             #3/2
     stop_sim_time = params['stop_sim_time']
-    snap_time =  params['snap_time']         #plot every so much time 
+    snap_iter_0D =  params['snap_iter_0D']         #plot every so much time 
+    snap_iter_2D =  params['snap_iter_2D']
     avg_time  =  params['avg_time']          #averaging timescale 
     chkp_time =  params['chkp_time']
     max_writes = params['max_writes']       #maximum number of plots
@@ -358,7 +359,7 @@ def run_horizontal_conv_sim(params):
 
     # 2D snapshots 
     snapshots = solver.evaluator.add_file_handler(f'{params["save_dir"]}/snaps2D', 
-                                                  iter=snap_time, max_writes=max_writes, mode=file_handler_mode)
+                                                  iter=snap_iter_2D, max_writes=max_writes, mode=file_handler_mode)
 
     snapshots.add_task(vorticity, name='vorticity')
     snapshots.add_task(u, name='velocity')
@@ -367,7 +368,7 @@ def run_horizontal_conv_sim(params):
 
     # 0D and 1D snapshots of space-integral quantities
     snapshots_integ = solver.evaluator.add_file_handler(f'{params["save_dir"]}/snaps', 
-                                                  iter=snap_time, max_writes=max_writes, mode=file_handler_mode)
+                                                  iter=snap_iter_0D, max_writes=max_writes, mode=file_handler_mode)
 
     snapshots_integ.add_task(heat_flux_top, name='heat flux top x')
     snapshots_integ.add_task(heat_flux_bot, name='heat flux bot x')
