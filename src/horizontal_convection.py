@@ -402,7 +402,7 @@ def run_horizontal_conv_sim(params):
     tavg_integ.add_task(S1(avg_dTdz_t,       avg_dTdz_t0,       domain=domain0D)/int_time, name='dTdz avg t')
     tavg_integ.add_task(S1(avg_dTdz_b,       avg_dTdz_b0,       domain=domain0D)/int_time, name='dTdz avg b')
     tavg_integ.add_task(S1(int_u_top_left,   int_u_top_left0,   domain=domain0D)/int_time, name='u top left int')
-    tavg_integ.add_task(S1(avg_Tdiff,        avg_Tdiff0,       domain=domain0D)/int_time, name='T diff avg')
+    tavg_integ.add_task(S1(avg_Tdiff,        avg_Tdiff0,        domain=domain0D)/int_time, name='T diff avg')
 
     tavg_integ.add_task(S1(avg_f_x,      avg_f_x0)/int_time,        name='f avg x')
     tavg_integ.add_task(S1(avg_dTdz_t_x, avg_dTdz_t_x0)/int_time,   name='heat flux top avg x')
