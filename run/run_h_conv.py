@@ -13,6 +13,7 @@ root = logging.root
 for h in root.handlers: h.setLevel("INFO") 
 logger = logging.getLogger(__name__)
 import horizontal_convection
+from optimum_beta import optimum_beta
 
 
 series = sys.argv[1]
@@ -56,12 +57,12 @@ import glob
 param_list = {
     'Lx': [6],
     'Lz': [1],
-    'Tm': [.6],
+    'Tm': [.9],
     'z0': [.8],
-    'Ra' : [1e5],#[1e4, 1e5, 1e6, 1e7],
+    'Ra' : [1e7],#[1e4, 1e5, 1e6, 1e7],
     'Pr' : [1.],
     'S' : [1.],
-    'ε' : [2e-2], # Need to explore/read about these. 
+    'ε' : [2e-3], # Need to explore/read about these. 
     'γ' : [2e-2],
     'δ' : [1e-2],
     'β' : [1.51044385],
@@ -96,11 +97,17 @@ params['save_dir'] = ["data/{:s}/{:s}".format(params.loc[i]['sim_suite'], params
 # series_restart = 'ch-3D-comparison-1'
 # params['restart_file'] = [last_save_file(f'{series_restart}-{i:0>3d}') for i in range(len(params))]
 
-params.to_csv(f'./parameters/parameters-{series}.csv')
+for i in range(len(params)):
+    Ra, θm, eps = (params['Ra'][i], params['Tm'][i], params['ε'][i])
+    beta_opt = optimum_beta(Ra, θm, eps)
+    # print(beta_opt)
+    print(params['β'][i], beta_opt)
 
-sim_dir = params.loc[index]['save_dir']
+# params.to_csv(f'./parameters/parameters-{series}.csv')
 
-if not os.path.isdir(sim_dir):
-    os.makedirs(sim_dir)
+# sim_dir = params.loc[index]['save_dir']
 
-horizontal_convection.run_horizontal_conv_sim(params.loc[index])
+# if not os.path.isdir(sim_dir):
+#     os.makedirs(sim_dir)
+
+# horizontal_convection.run_horizontal_conv_sim(params.loc[index])
