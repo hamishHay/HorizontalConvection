@@ -8,9 +8,8 @@ def get_eqlb_z(θm, Ra, beta=0.25, gamma=0.27):
     """
 
     def f(z):
-        return gamma * Ra**beta * (1 - θm) ** (1.0 + beta) * z ** (3*beta - 1) * (1.0 - z) - θm
+        return gamma * Ra**beta * (1 - θm)**(1 + beta) * z**(3*beta - 1) * (1.0 - z) - θm
         
-
     sol = root_scalar(f, bracket=[1e-10, 1.0 - 1e-10], method="bisect")
 
     if not sol.converged:
@@ -18,27 +17,36 @@ def get_eqlb_z(θm, Ra, beta=0.25, gamma=0.27):
 
     return sol.root
 
+def optimum_m(Ra, Htilde, a=1.3, b=3.52):
+    # Htilde  = 1 - get_eqlb_z(θm, Ra)
+    E = 0.14 * Ra**0.72
+    Hups = Htilde * np.sqrt(E)
 
-def optimum_beta(Ra, θm, eps, c=0.44, m=8.5):
+    return a*Hups + b
+
+
+def optimum_beta(Ra, θm, eps, c=0.435, m=8.5):
     beta_opt = 1.51
 
     # Step 1: Get zinf
     zinf = get_eqlb_z(θm, Ra, beta=0.25, gamma=0.27)
 
     # Step 2: Get effective Rayleigh
-    Ra_eff = zinf**3 * (1.0 - θm)
+    Ra_eff = Ra * zinf**3 * (1.0 - θm)
 
     # Step 3: Check if near turbulence transition and, if so,
     #         update the effective Rayleigh number
     if Ra_eff >= 1e8:
         zinf = get_eqlb_z(θm, Ra, beta=1/3, gamma=0.07)
-        Ra_eff = zinf**3 * (1.0 - θm)
+        Ra_eff = Ra * zinf**3 * (1.0 - θm)
 
     # Step 4: Obtain strain rate using E--Ra_eff relationsips
     E = 0.14 * Ra_eff**0.72
 
+    m = optimum_m(Ra, θm, 1 - zinf)
     # Step 5: Get optimum beta 
-    beta_opt = 1.0/np.sqrt(m * eps * np.sqrt(E) + 0.44)
+    beta_opt = 1.0/np.sqrt(m * eps * np.sqrt(E) + c)
 
+    # Question: Does m depend on H?
     return beta_opt
 
