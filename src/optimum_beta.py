@@ -41,12 +41,12 @@ def optimum_beta(Ra, θm, eps, c=0.435, m=8.5):
         Ra_eff = Ra * zinf**3 * (1.0 - θm)
 
     # Step 4: Obtain strain rate using E--Ra_eff relationsips
-    E = 0.14 * Ra_eff**0.72
+    E = 0.14 * Ra_eff**0.72 # Should this change for turbulence?
 
     m = optimum_m(Ra, θm, 1 - zinf)
     # Step 5: Get optimum beta 
     beta_opt = 1.0/np.sqrt(m * eps * np.sqrt(E) + c)
 
     # Question: Does m depend on H?
-    return beta_opt
+    return beta_opt, zinf
 
