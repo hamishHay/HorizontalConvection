@@ -9,6 +9,10 @@ import time
 import glob
 import h5py
 from diagnostics import array_diff_1D, array_mult, array_diff_2D, ice_ocean_interface_extract
+from mpi4py import MPI
+
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
 
 def run_horizontal_conv_sim(params):
     # Model parameters
@@ -112,6 +116,10 @@ def run_horizontal_conv_sim(params):
     f = dist.Field(name='f', bases=(xbasis,zbasis))
     ft = dist.Field(name='ft', bases=(xbasis,zbasis))
     u = dist.VectorField(coords, name='u', bases=(xbasis,zbasis))
+    xf = dist.Field(name='xf', bases=(xbasis,zbasis))
+    xf['g'] = x
+    zf = dist.Field(name='z', bases=(xbasis,zbasis))
+    zf['g'] = z
 
     t = dist.Field(name="t")
 
@@ -121,8 +129,14 @@ def run_horizontal_conv_sim(params):
     # ------------------------- diagnostic quantities ---------------------------------
     # ---------------------------------------------------------------------------------
 
-    xx, zz = x+0*z, 0*x+z
-    xx_d, zz_d = x_dealias+0*z_dealias, 0*x_dealias+z_dealias
+    xx, zz = xf['g']+0*zf['g'], 0*xf['g']+zf['g']
+
+    xf.change_scales(dealias)
+    zf.change_scales(dealias)
+    xx_d, zz_d = xf['g']+0*zf['g'], 0*xf['g']+zf['g']
+    xf.change_scales(1)
+    zf.change_scales(1)
+
 
     # Masks for centre--edges diagnostics
     mask_center = (xx_d >= Lx/4 ) & (xx_d <= 3*Lx/4) 
@@ -163,13 +177,16 @@ def run_horizontal_conv_sim(params):
     avg_KE_liq0 = np.zeros((1,1))
 
     avg_f_x = dist.Field(name='avg_f_x', bases=(xbasis))            # phase-topology profile (vertical average of f)
-    avg_f_x0 = np.zeros((3*nx // 2, 1))
+    avg_f_x.change_scales(dealias)                                  
+    avg_f_x0 = np.zeros(np.shape(avg_f_x['g']))
 
     avg_dTdz_t_x = dist.Field(name='avg_dTdz_t_x', bases=(xbasis))  # heat flux profile domain top
-    avg_dTdz_t_x0 = np.zeros((3*nx // 2, 1))
+    avg_dTdz_t_x.change_scales(dealias)
+    avg_dTdz_t_x0 = np.zeros(np.shape(avg_dTdz_t_x['g']))
 
     avg_dTdz_b_x = dist.Field(name='avg_dTdz_b_x', bases=(xbasis))  # heat flux profile domain bot
-    avg_dTdz_b_x0 = np.zeros((3*nx // 2, 1))
+    avg_dTdz_b_x.change_scales(dealias)
+    avg_dTdz_b_x0 = np.zeros(np.shape(avg_dTdz_b_x['g']))
 
     avg_Nu = dist.Field(name='Nu')                                  # horizontal avg Nusselt number at the top 
     avg_Nu0 = np.zeros((1,1))
@@ -188,34 +205,42 @@ def run_horizontal_conv_sim(params):
 
     avg_u = dist.VectorField(coords, name='avg_u',                  # 3D average velocity
                              bases=(xbasis,zbasis), dtype=dtype)
-    avg_u0 = np.zeros((2, 3*nx // 2, 3*nz // 2), dtype=dtype)
+    avg_u.change_scales(dealias)
+    avg_u0 = np.zeros(np.shape(avg_u['g']), dtype=dtype)
     
     avg_uT = dist.VectorField(coords, name='avg_uT',                # 3D avg advective temperature flux
                               bases=(xbasis,zbasis), dtype=dtype)
-    avg_uT0 = np.zeros((2, 3*nx // 2, 3*nz // 2), dtype=dtype)
+    avg_uT.change_scales(dealias)
+    avg_uT0 = np.zeros(np.shape(avg_uT['g']), dtype=dtype)
 
     avg_T = dist.Field(name="avg_T", bases=(xbasis,zbasis))         # 3D avg temperature
-    avg_T0 = np.zeros((3*nx // 2, 3*nz // 2))
+    avg_T.change_scales(dealias)
+    avg_T0 = np.zeros(np.shape(avg_T['g']))
 
     avg_f = dist.Field(name="avg_f", bases=(xbasis,zbasis))         # 3D average phase
-    avg_f0 = np.zeros((3*nx // 2, 3*nz // 2))
+    avg_f.change_scales(dealias)
+    avg_f0 = np.zeros(np.shape(avg_f['g']))
 
     int_u_top_left = dist.Field(name='int_u_top_left')              # average horizontal velocity in top left 
     int_u_top_left0 = np.zeros((1, 1))
 
     avg_dTdz_out = dist.Field(name='avg_dTdz_out', bases=(zbasis))  # average temperature gradient in outer
-    avg_dTdz_out0 = np.zeros((1, 3*nz // 2))
+    avg_dTdz_out.change_scales(dealias)
+    avg_dTdz_out0 = np.zeros(np.shape(avg_dTdz_out['g']))
 
     avg_dTdz_in = dist.Field(name='avg_dTdz_in', bases=(zbasis))    # average temperature gradient in inner
-    avg_dTdz_in0 = np.zeros((1, 3*nz // 2))
+    avg_dTdz_in.change_scales(dealias)
+    avg_dTdz_in0 = np.zeros(np.shape(avg_dTdz_in['g']))
 
     avg_gradT = dist.VectorField(coords, name='avg_gradT',          # diffusive temperature flux
                                  bases=(xbasis,zbasis))
-    avg_gradT0 = np.zeros((2, 3*nx // 2, 3*nz // 2), dtype=dtype)
+    avg_gradT.change_scales(dealias)
+    avg_gradT0 = np.zeros(np.shape(avg_gradT['g']), dtype=dtype)
 
     avg_gradT_io = dist.VectorField(coords, name='avg_gradT_io',    # diffusive temperature flux at ice--ocean interface 
                                     bases=(xbasis))
-    avg_gradT_io0 = np.zeros((2, 3*nx // 2, 1), dtype=dtype)
+    avg_gradT_io.change_scales(dealias)
+    avg_gradT_io0 = np.zeros(np.shape(avg_gradT_io['g']), dtype=dtype)
 
     avg_Tdiff =  dist.Field(name='avg_T_diff')                      # average temp difference between domain center and edges 
     avg_Tdiff0 = np.zeros((1, 1))
@@ -227,8 +252,7 @@ def run_horizontal_conv_sim(params):
     # ---------------------------------------------------------------------------------
 
 
-    zf = dist.Field(name='z', bases=(xbasis,zbasis))
-    zf['g'] = z
+
 
     T_bot = dist.Field(name='T_bot',bases=(xbasis))
     T_bot['g'] = 1 - b*np.cos(2*np.pi*x/Lx) # 1 here must be T_bot(z=0)
@@ -269,8 +293,8 @@ def run_horizontal_conv_sim(params):
 
     problem.add_equation("dt(f) - ft = 0")
     problem.add_equation("div(u) + tau_div_eq = 0")
-    problem.add_equation("dt(T) - div(grad(T)) - S*dt(f)              + tau_temp_eq = - (1-f*adv)*u@grad(T) + T*u@grad(f)*adv")
-    problem.add_equation("(5/6)*S*dt(f) - γ*div(grad(f))        + tau_phas_eq = -ϵ**(-2)*f*(1-f)*(γ*(1-2*f) + (T-Tm-a*(zf-z0)))")
+    problem.add_equation("dt(T) - div(grad(T)) - (1/S)*dt(f)              + tau_temp_eq = - (1-f*adv)*u@grad(T) + T*u@grad(f)*adv")
+    problem.add_equation("(5/6)*(1/S)*dt(f) - γ*div(grad(f))        + tau_phas_eq = -ϵ**(-2)*f*(1-f)*(γ*(1-2*f) + (T-Tm-a*(zf-z0)))")
     problem.add_equation("dt(u)/Pr - div(grad(u)) + grad(p) -Ra*T*ez + tau_mom_eq  = - u@grad(u)/Pr - (1/(ϵ*β)**2)*f*u")
 
     # ---------------------------------------------------------------------------------
@@ -283,7 +307,8 @@ def run_horizontal_conv_sim(params):
     problem.add_equation("f(z=Lz) = 1")
     
     # domain bottom
-    problem.add_equation("T(z=0) = T_bot")
+    # problem.add_equation("T(z=0) = T_bot")
+    problem.add_equation("dz(T)(z=0) = -1")
     problem.add_equation("u(z=0) = 0")
     problem.add_equation("f(z=0) = 0")
 
@@ -423,56 +448,59 @@ def run_horizontal_conv_sim(params):
             solver.step(timestep)
             if (solver.iteration-1) % avg_time == 0:   
                 # Reset variables for averaging 
-                avg_KE0[:,:] = avg_KE['g']
-                avg_KE_ice0[:,:] = avg_KE_ice['g']
-                avg_KE_liq0[:,:] = avg_KE_liq['g']
-
-                avg_dTdz_t0[:,:] = avg_dTdz_t['g']
-                avg_dTdz_b0[:,:] = avg_dTdz_b['g']
-
-                avg_Tdiff0[:,:] = avg_Tdiff['g']
-
-                avg_Nu0[:,:]   = avg_Nu['g']
-                avg_Re0[:,:]   = avg_Re['g']
-                avg_dTdz0[:,:] = avg_dTdz['g']
-                int_u_top_left0[:,:] = int_u_top_left['g']
                 
-                avg_f_x.change_scales(3/2)
+                # 0D averages are only handled by process 0
+                if rank == 0:
+                    avg_KE0[:,:] = avg_KE['g']
+                    avg_KE_ice0[:,:] = avg_KE_ice['g']
+                    avg_KE_liq0[:,:] = avg_KE_liq['g']
+
+                    avg_dTdz_t0[:,:] = avg_dTdz_t['g']
+                    avg_dTdz_b0[:,:] = avg_dTdz_b['g']
+
+                    avg_Tdiff0[:,:] = avg_Tdiff['g']
+
+                    avg_Nu0[:,:]   = avg_Nu['g']
+                    avg_Re0[:,:]   = avg_Re['g']
+                    avg_dTdz0[:,:] = avg_dTdz['g']
+                    int_u_top_left0[:,:] = int_u_top_left['g']
+                
+                avg_f_x.change_scales(dealias)
                 avg_f_x0[:] = avg_f_x['g']
 
-                avg_dTdz_t_x.change_scales(3/2)
+                avg_dTdz_t_x.change_scales(dealias)
                 avg_dTdz_t_x0[:] = avg_dTdz_t_x['g']
 
-                avg_dTdz_b_x.change_scales(3/2)
+                avg_dTdz_b_x.change_scales(dealias)
                 avg_dTdz_b_x0[:] = avg_dTdz_b_x['g']
 
-                avg_dTdz_out.change_scales(3/2)
+                avg_dTdz_out.change_scales(dealias)
                 avg_dTdz_out0[:] = avg_dTdz_out['g']
 
-                avg_dTdz_in.change_scales(3/2)
+                avg_dTdz_in.change_scales(dealias)
                 avg_dTdz_in0[:] = avg_dTdz_in['g']
 
-                avg_u.change_scales(3/2)
+                avg_u.change_scales(dealias)
                 avg_u0[:, :, :] = avg_u['g']
 
-                avg_T.change_scales(3/2)
+                avg_T.change_scales(dealias)
                 avg_T0[:,:] = avg_T['g']
 
-                avg_f.change_scales(3/2)
+                avg_f.change_scales(dealias)
                 avg_f0[:,:] = avg_f['g'][:,:]
 
-                avg_gradT.change_scales(3/2)
+                avg_gradT.change_scales(dealias)
                 avg_gradT0[:, :, :] = avg_gradT['g']
 
-                avg_gradT_io.change_scales(3/2)
+                avg_gradT_io.change_scales(dealias)
                 avg_gradT_io0[:, :, :] = avg_gradT_io['g']
 
             if solver.iteration % print_step == 0:
                 log = [f'it {solver.iteration:d}',
-                       f'sim time {solver.sim_time:.2f}',
+                       f'sim time {solver.sim_time:.4f}',
                        f'wall time {(time.time() - start_time):.1f} s',
                        f'max u {np.amax(abs(u['g'])):.3f}',
-                       f'isnan? {np.isnan(np.sum(u['g'])):.3f}',
+                       f'isnan? {np.isnan(np.sum(u['g'])):.0f}',
                        ]
                 logger.info(', '.join(log))
 
