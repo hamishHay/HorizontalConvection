@@ -7,13 +7,13 @@ import numpy as np
 import pandas as pd
 import logging
 import sys
-sys.path.append("../src/")
+sys.path.append("../../src/")
 import os
 root = logging.root
 for h in root.handlers: h.setLevel("INFO") 
 logger = logging.getLogger(__name__)
 import horizontal_convection
-from optimum_beta import optimum_beta
+from optimum_beta import optimum_beta_RaF#, get_eqlb_z
 
 
 series = sys.argv[1]
@@ -53,42 +53,55 @@ def create_dataframe(param_dic):
     return params
 
 import glob
+from mpi4py import MPI
+
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+
+
+Ras = [1e5]#, 1e9]
+dts = [2e-6]#, 1e-9]
+stop_time = [10.0]
 
 param_list = {
-    'Lx': [6],
+    'Lx': [5],
     'Lz': [1],
-    'Tm': [.9],
-    'z0': [.8],
-    'Ra' : [1e7],#[1e4, 1e5, 1e6, 1e7],
-    'Pr' : [1.],
-    'S' : [1.],
+    ('Tm', 'z0'): ([0.2, 0.4],[0.8, 0.6]),
+    # 'z0': [.8],
+    ('Ra', 'timestep', 'stop_sim_time') : (Ras, dts, stop_time), 
+    'Pr' : [1.0],
+    'S' : [0.5],
     'ε' : [2e-3], # Need to explore/read about these. 
-    'γ' : [2e-2],
+    'γ' : [2e-3],
     'δ' : [1e-2],
     'β' : [1.51044385],
     'm' : [0.],
     'n' : [0.],
     'a' : [0.],
-    'b' : [0.],
+    'b' : [0., 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
     'timestepper':['SBDF2'],
-    'timestep': [1e-4],
-    'stop_sim_time':[0.4, 0.4],
+    # 'timestep': [1e-4],
+    # 'stop_sim_time':[0.4, 0.4],
     'snap_iter_2D':[100],
     'snap_iter_0D':[10],
     'avg_time': [500],
-    'print_step':[50],
+    'print_step':[200],
     'max_writes':[10000],
-    'nx':[128],
-    'nz':[128],
+    'nx':[512],
+    'nz':[1024],
     'dealias':[1.5],
     'save_dir': [save_dir],
     'script':[0],
     'adv': [0],
-    'restart': [0],
+    'restart': ["/home/hcfch1/scratch/HorizontalConvection/lcl/A5_Ra4/data/Ra4/000/chkp/chkp_s11.h5"],
     'chkp_time': [1000]
 }
 
 params = create_dataframe(param_list)
+
+
+params = params.sort_values(by=["Tm", "b"]).reset_index(drop=True)
+
 params['sim_name'] = ['-'.join([series,f'{i:0>3d}']) for i in params.index]
 params['sim_index'] = [f'{i:0>3d}' for i in params.index]
 params['sim_suite'] = [series for i in params.index]
@@ -99,15 +112,35 @@ params['save_dir'] = ["data/{:s}/{:s}".format(params.loc[i]['sim_suite'], params
 
 for i in range(len(params)):
     Ra, θm, eps = (params['Ra'][i], params['Tm'][i], params['ε'][i])
-    beta_opt = optimum_beta(Ra, θm, eps)
-    # print(beta_opt)
-    print(params['β'][i], beta_opt)
 
-# params.to_csv(f'./parameters/parameters-{series}.csv')
+    P = params["stop_sim_time"][i]
+    dt = params["timestep"][i]
 
-# sim_dir = params.loc[index]['save_dir']
+    params.loc[i, 'β'] = optimum_beta_RaF(Ra, θm, eps)
 
-# if not os.path.isdir(sim_dir):
-#     os.makedirs(sim_dir)
+    params.loc[i, 'snap_iter_2D'] = round(P / 100 / dt)
 
-# horizontal_convection.run_horizontal_conv_sim(params.loc[index])
+    params.loc[i, 'snap_iter_0D'] = round(P / 1000 / dt)
+
+    params.loc[i, 'avg_time'] = round(P / 10 / dt)    # average every 10% of the end time 
+
+    params.loc[i, 'chkp_time'] = round(P / 20 / dt)
+
+    if isinstance(params.loc[i, 'restart'], str):
+        params.loc[i, 'stop_sim_time'] += P
+
+params.to_csv(f'./parameters/parameters-{series}.csv')
+
+sim_dir = params.loc[index]['save_dir']
+
+
+# Do some work
+# print(f"Rank {rank} reached the barrier")
+
+# print(f"Rank {rank} passed the barrier")
+
+if rank == 0 and not os.path.isdir(sim_dir):
+    os.makedirs(sim_dir)
+
+comm.Barrier()  # Wait here until all ranks arrive
+horizontal_convection.run_horizontal_conv_sim(params.loc[index])
