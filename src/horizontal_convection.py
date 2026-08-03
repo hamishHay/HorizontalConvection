@@ -38,7 +38,7 @@ def run_horizontal_conv_sim(params):
     restart = params['restart']
     save_dir = params['save_dir']
 
-
+    phase = 1
     # Numerical parameters
     nx, nz =     params['nx'], params['nz']
     timestep =   params['timestep']
@@ -113,8 +113,6 @@ def run_horizontal_conv_sim(params):
     # ---------------------------------------------------------------------------------
     p = dist.Field(name='p', bases=(xbasis,zbasis))
     T = dist.Field(name='T', bases=(xbasis,zbasis))
-    f = dist.Field(name='f', bases=(xbasis,zbasis))
-    ft = dist.Field(name='ft', bases=(xbasis,zbasis))
     u = dist.VectorField(coords, name='u', bases=(xbasis,zbasis))
     xf = dist.Field(name='xf', bases=(xbasis,zbasis))
     xf['g'] = x
@@ -123,7 +121,12 @@ def run_horizontal_conv_sim(params):
 
     t = dist.Field(name="t")
 
-    variables = [p, u, T, f, ft]
+    variables = [p, u, T]
+
+    if phase:
+        f = dist.Field(name='f', bases=(xbasis,zbasis))
+        ft = dist.Field(name='ft', bases=(xbasis,zbasis))
+        variables += [f, ft]
 
     # ---------------------------------------------------------------------------------
     # ------------------------- diagnostic quantities ---------------------------------
@@ -144,24 +147,28 @@ def run_horizontal_conv_sim(params):
     mask_bot_left = (xx_d < Lx/2) & (zz_d < 0.5)
     mask_top_left = (xx_d < Lx/2) & (zz_d >= 0.5)
 
-    V_liq = d3.integ(1-f)
-    V_ice = d3.integ(f) # Volume of ice = total volume - volume of liquid
-
     KE = d3.Average(u@u)
-    KE_ice = d3.integ(u@u * f) / V_ice
-    KE_liq = d3.integ(u@u * (1-f)) / V_liq
+    if phase:
+        V_liq = d3.integ(1-f)
+        V_ice = d3.integ(f) # Volume of ice = total volume - volume of liquid
+        KE_ice = d3.integ(u@u * f) / V_ice
+        KE_liq = d3.integ(u@u * (1-f)) / V_liq
 
     # heat = d3.integ(T) - S*d3.integ(f)
     vorticity = -d3.div(d3.skew(u))
 
-    Re_liq = d3.integ(np.sqrt(u@u) * (1-f), ('x', 'z')) / V_liq
     Nu_RB = d3.Average(dz(T)(z=Lz), ('x'))
-    dTdz = d3.integ(dz(T)*(f-1)) / V_liq
-    f_profile = d3.Average(f, ('z'))
+    Re_liq = d3.Average(np.sqrt(u@u), ('x', 'z')) 
+    dTdz = d3.Average(dz(T)) 
+    if phase:
+        Re_liq = d3.integ(np.sqrt(u@u) * (1-f), ('x', 'z')) / V_liq
+        dTdz = d3.integ(dz(T)*(f-1)) / V_liq
+        f_profile = d3.Average(f, ('z'))
 
     # boundary quantities
     heat_flux_top = dz(T)(z=Lz) 
     heat_flux_bot = dz(T)(z=0)
+    T_b = d3.Average(T(z=0), ('x'))
 
     # ---------------------------------------------------------------------------------
     # ------------------------ time-average diagnostics -------------------------------
@@ -170,15 +177,16 @@ def run_horizontal_conv_sim(params):
     avg_KE = dist.Field(name='avg_KE')                              # avg kinetic energy
     avg_KE0 = np.zeros((1,1))
 
-    avg_KE_ice = dist.Field(name='avg_KE_ice')                      # avg kinetic energy in ice
-    avg_KE_ice0 = np.zeros((1,1))
+    if phase:
+        avg_KE_ice = dist.Field(name='avg_KE_ice')                  # avg kinetic energy in ice
+        avg_KE_ice0 = np.zeros((1,1))
 
-    avg_KE_liq = dist.Field(name='avg_KE_liq')                      # acg kinetic energy in ice
-    avg_KE_liq0 = np.zeros((1,1))
+        avg_KE_liq = dist.Field(name='avg_KE_liq')                  # avg kinetic energy in ice
+        avg_KE_liq0 = np.zeros((1,1))
 
-    avg_f_x = dist.Field(name='avg_f_x', bases=(xbasis))            # phase-topology profile (vertical average of f)
-    avg_f_x.change_scales(dealias)                                  
-    avg_f_x0 = np.zeros(np.shape(avg_f_x['g']))
+        avg_f_x = dist.Field(name='avg_f_x', bases=(xbasis))        # phase-topology profile (vertical average of f)
+        avg_f_x.change_scales(dealias)                                  
+        avg_f_x0 = np.zeros(np.shape(avg_f_x['g']))
 
     avg_dTdz_t_x = dist.Field(name='avg_dTdz_t_x', bases=(xbasis))  # heat flux profile domain top
     avg_dTdz_t_x.change_scales(dealias)
@@ -200,6 +208,9 @@ def run_horizontal_conv_sim(params):
     avg_dTdz_b = dist.Field(name='avg_dTdz_b')                      # horizontal and time avg dTdz bot
     avg_dTdz_b0 = np.zeros((1,1))
 
+    avg_T_b = dist.Field(name='avg_T_b')                            # horizontal and time avg T bot
+    avg_T_b0 = np.zeros((1,1))
+
     avg_Re = dist.Field(name="Re")                                  # volume avg Reynolds number in the liquid
     avg_Re0 = np.zeros((1,1))
 
@@ -217,9 +228,10 @@ def run_horizontal_conv_sim(params):
     avg_T.change_scales(dealias)
     avg_T0 = np.zeros(np.shape(avg_T['g']))
 
-    avg_f = dist.Field(name="avg_f", bases=(xbasis,zbasis))         # 3D average phase
-    avg_f.change_scales(dealias)
-    avg_f0 = np.zeros(np.shape(avg_f['g']))
+    if phase:
+        avg_f = dist.Field(name="avg_f", bases=(xbasis,zbasis))         # 3D average phase
+        avg_f.change_scales(dealias)
+        avg_f0 = np.zeros(np.shape(avg_f['g']))
 
     int_u_top_left = dist.Field(name='int_u_top_left')              # average horizontal velocity in top left 
     int_u_top_left0 = np.zeros((1, 1))
@@ -237,17 +249,20 @@ def run_horizontal_conv_sim(params):
     avg_gradT.change_scales(dealias)
     avg_gradT0 = np.zeros(np.shape(avg_gradT['g']), dtype=dtype)
 
-    avg_gradT_io = dist.VectorField(coords, name='avg_gradT_io',    # diffusive temperature flux at ice--ocean interface 
-                                    bases=(xbasis))
-    avg_gradT_io.change_scales(dealias)
-    avg_gradT_io0 = np.zeros(np.shape(avg_gradT_io['g']), dtype=dtype)
+    if phase:
+        avg_gradT_io = dist.VectorField(coords, name='avg_gradT_io',    # diffusive temperature flux at ice--ocean interface 
+                                        bases=(xbasis))
+        avg_gradT_io.change_scales(dealias)
+        avg_gradT_io0 = np.zeros(np.shape(avg_gradT_io['g']), dtype=dtype)
 
     avg_Tdiff =  dist.Field(name='avg_T_diff')                      # average temp difference between domain center and edges 
     avg_Tdiff0 = np.zeros((1, 1))
 
-    diags = [avg_KE, avg_f_x, avg_dTdz_b_x, avg_dTdz_t_x, avg_Nu, avg_Re, avg_KE_ice, avg_KE_liq, avg_u, avg_T, avg_f,
-             avg_dTdz, avg_dTdz_in, avg_dTdz_out, int_u_top_left, avg_gradT, avg_uT, avg_gradT_io, avg_dTdz_b, avg_dTdz_t, avg_Tdiff]
+    diags = [avg_KE, avg_dTdz_b_x, avg_dTdz_t_x, avg_Nu, avg_Re,  avg_u, avg_T, 
+             avg_dTdz, avg_dTdz_in, avg_dTdz_out, int_u_top_left, avg_gradT, avg_uT, avg_dTdz_b, avg_dTdz_t, avg_Tdiff, avg_T_b]
 
+    if phase:
+        diags += [avg_f_x, avg_KE_ice, avg_KE_liq, avg_f, avg_gradT_io]
     # ---------------------------------------------------------------------------------
     # ---------------------------------------------------------------------------------
 
@@ -257,6 +272,9 @@ def run_horizontal_conv_sim(params):
     T_bot = dist.Field(name='T_bot',bases=(xbasis))
     T_bot['g'] = 1 - b*np.cos(2*np.pi*x/Lx) # 1 here must be T_bot(z=0)
 
+    F_bot = dist.Field(name='F_bot',bases=(xbasis))
+    F_bot['g'] = -1 + b*np.cos(2*np.pi*x/Lx) # 1 here must be T_bot(z=0)
+
     # ---------------------------------------------------------------------------------
     # ---------------------------------- Tau terms ------------------------------------
     # ---------------------------------------------------------------------------------
@@ -265,21 +283,28 @@ def run_horizontal_conv_sim(params):
     tau_T1 = dist.Field(name='tau_T1', bases=xbasis)
     tau_T2 = dist.Field(name='tau_T2', bases=xbasis)
 
-    tau_f1 = dist.Field(name='tau_f1', bases=xbasis)
-    tau_f2 = dist.Field(name='tau_f2', bases=xbasis)
     tau_u1 = dist.VectorField(coords, name='tau_u1', bases=xbasis)
     tau_u2 = dist.VectorField(coords, name='tau_u2', bases=xbasis)
 
     tau_div_eq  = ez@lift(tau_u1) + tau_p
     tau_temp_eq = -dz(lift(tau_T1)) + lift(tau_T2)
-    tau_phas_eq = -γ*dz(lift(tau_f1)) + lift(tau_f2)
     tau_mom_eq  = -dz(lift(tau_u1)) + lift(tau_u2)
+
+    tau_terms = [tau_p, tau_T1, tau_T2, tau_u1, tau_u2]
+
+    if phase:
+        tau_f1 = dist.Field(name='tau_f1', bases=xbasis)
+        tau_f2 = dist.Field(name='tau_f2', bases=xbasis)
+        tau_phas_eq = -γ*dz(lift(tau_f1)) + lift(tau_f2)
+
+        tau_terms += [tau_f1, tau_f2]
+
 
     # simpler reformulation of the tau terms
     # (d3.trace(ez*lift(tau_u1)) - ez@lift(tau_u1)).evaluate()['g'].max() # .6 faster
     # (d3.div(ez*lift(tau_T1)) - dz(lift(tau_T1))).evaluate()['g'].max() # 2.6/7.3 ~ .35 faster
 
-    tau_terms = [tau_p, tau_T1, tau_T2, tau_f1, tau_f2, tau_u1, tau_u2]
+    
 
     # ---------------------------------------------------------------------------------
     # ------------------------------ Setup problem ------------------------------------
@@ -291,11 +316,16 @@ def run_horizontal_conv_sim(params):
     # ---------------------------- Problem equations ----------------------------------
     # ---------------------------------------------------------------------------------
 
-    problem.add_equation("dt(f) - ft = 0")
     problem.add_equation("div(u) + tau_div_eq = 0")
-    problem.add_equation("dt(T) - div(grad(T)) - (1/S)*dt(f)              + tau_temp_eq = - (1-f*adv)*u@grad(T) + T*u@grad(f)*adv")
-    problem.add_equation("(5/6)*(1/S)*dt(f) - γ*div(grad(f))        + tau_phas_eq = -ϵ**(-2)*f*(1-f)*(γ*(1-2*f) + (T-Tm-a*(zf-z0)))")
-    problem.add_equation("dt(u)/Pr - div(grad(u)) + grad(p) -Ra*T*ez + tau_mom_eq  = - u@grad(u)/Pr - (1/(ϵ*β)**2)*f*u")
+
+    if phase:
+        problem.add_equation("dt(f) - ft = 0")
+        problem.add_equation("(5/6)*(1/S)*dt(f) - γ*div(grad(f))        + tau_phas_eq = -ϵ**(-2)*f*(1-f)*(γ*(1-2*f) + (T-Tm-a*(zf-z0)))")
+        problem.add_equation("dt(T) - div(grad(T)) - (1/S)*dt(f)              + tau_temp_eq = - (1-f*adv)*u@grad(T) + T*u@grad(f)*adv")
+        problem.add_equation("dt(u)/Pr - div(grad(u)) + grad(p) -Ra*T*ez + tau_mom_eq  = - u@grad(u)/Pr - (1/(ϵ*β)**2)*f*u")
+    else:
+        problem.add_equation("dt(T) - div(grad(T))               + tau_temp_eq = - u@grad(T)")
+        problem.add_equation("dt(u)/Pr - div(grad(u)) + grad(p) -Ra*T*ez + tau_mom_eq  = - u@grad(u)/Pr")
 
     # ---------------------------------------------------------------------------------
     # ---------------------------- Boundary conditions --------------------------------
@@ -304,13 +334,13 @@ def run_horizontal_conv_sim(params):
     # domain top
     problem.add_equation("T(z=Lz) = 0")
     problem.add_equation("u(z=Lz) = 0")
-    problem.add_equation("f(z=Lz) = 1")
+    if phase: problem.add_equation("f(z=Lz) = 1")
     
     # domain bottom
     # problem.add_equation("T(z=0) = T_bot")
-    problem.add_equation("dz(T)(z=0) = -1")
+    problem.add_equation("dz(T)(z=0) = F_bot")
     problem.add_equation("u(z=0) = 0")
-    problem.add_equation("f(z=0) = 0")
+    if phase: problem.add_equation("f(z=0) = 0")
 
     problem.add_equation("integ(p) = 0") # Pressure gauge
 
@@ -319,14 +349,17 @@ def run_horizontal_conv_sim(params):
     # ---------------------------------------------------------------------------------
 
     problem.add_equation("dt(avg_KE)       = KE")
-    problem.add_equation("dt(avg_KE_ice)   = KE_ice")
-    problem.add_equation("dt(avg_KE_liq)   = KE_liq")
-    problem.add_equation("dt(avg_f_x)      = f_profile")
+    if phase:
+        problem.add_equation("dt(avg_KE_ice)   = KE_ice")
+        problem.add_equation("dt(avg_KE_liq)   = KE_liq")
+        problem.add_equation("dt(avg_f_x)      = f_profile")
     problem.add_equation("dt(avg_dTdz_t_x) = heat_flux_top")
     problem.add_equation("dt(avg_dTdz_b_x) = heat_flux_bot")
 
     problem.add_equation("dt(avg_dTdz_t) = integ(heat_flux_top, 'x')")      # Integral to get total heat
     problem.add_equation("dt(avg_dTdz_b) = integ(heat_flux_bot, 'x')")
+    problem.add_equation("dt(avg_T_b) = T_b")
+
 
     problem.add_equation("dt(avg_Nu) = Nu_RB")
     problem.add_equation("dt(avg_Re) = Re_liq")
@@ -334,12 +367,12 @@ def run_horizontal_conv_sim(params):
 
     problem.add_equation("dt(avg_u) - u = 0")
     problem.add_equation("dt(avg_T) - T = 0")
-    problem.add_equation("dt(avg_f) - f = 0")
+    if phase: problem.add_equation("dt(avg_f) - f = 0")
 
     problem.add_equation("dt(avg_dTdz_out) = Average(S2(dz(T), mask_edges), 'x')" )
     problem.add_equation("dt(avg_dTdz_in) =  Average(S2(dz(T), mask_center), 'x')" )
     problem.add_equation("dt(avg_gradT) - grad(T) = 0 " )
-    problem.add_equation("dt(avg_gradT_io) = S3(grad(T), f) " )
+    if phase: problem.add_equation("dt(avg_gradT_io) = S3(grad(T), f) " )
     problem.add_equation("dt(avg_uT)      = u*T")
     problem.add_equation("dt(avg_Tdiff) = integ(S2(T, mask_center)) - integ(S2(T, mask_edges))" )
 
@@ -356,24 +389,37 @@ def run_horizontal_conv_sim(params):
     # ----------------------------- Initial conditions --------------------------------
     # ---------------------------------------------------------------------------------
 
-    f.change_scales(1)
+    if phase: f.change_scales(1)
     u.change_scales(1)
     T.change_scales(1)
 
-    if restart <= 0:
-        mask = lambda x : 0.5*(1 + np.tanh(x/(2*ϵ)))
-        f['g'] = mask(z-z0) #Initial phase field (smooth mask, liquid from 0 to z0, ice above) 
+    if isinstance(restart,str):
+        write, initial_timestep = solver.load_state(restart)
+        file_handler_mode = 'append'
+        solver.stop_sim_time += stop_sim_time
+    elif restart == 0:
         u['g'] = 0
         T.fill_random('g', seed=42, distribution='normal', scale=2e-4) # Random noise
         k = 2*np.pi / Lx 
-        T['g'] += np.heaviside(z-z0, 1)*Tm*(z-1)/(z0-1) # Temperature in the ice 
-        T['g'] += (1-np.heaviside(z-z0,1))*(1 + (Tm-1)*z/z0 
-                                            - b*np.sinh(k*(z0-z)) / np.sinh(k *z0) * np.cos(k*x) ) # Temperature in the liquid
-
+        if phase:
+            mask = lambda x : 0.5*(1 + np.tanh(x/(2*ϵ)))
+            f['g'] = mask(z-z0) #Initial phase field (smooth mask, liquid from 0 to z0, ice above) 
+            T['g'] *= (1-np.heaviside(z-z0,1)) # Remove random fluctuations in ice
+            T['g'] += np.heaviside(z-z0, 1)*Tm*(z-1)/(z0-1) # Temperature in the ice 
+            # T['g'] += (1-np.heaviside(z-z0,1))*(1 + (Tm-1)*z/z0 
+            #                                     - b*np.sinh(k*(z0-z)) / np.sinh(k *z0) * np.cos(k*x) ) # Temperature in the liquid
+        
+            T['g'] += (1-np.heaviside(z-z0,1)) *(Tm + z0 - z - b*np.sinh(k*(z0-z)) / (k*np.cosh(k *z0)) * np.cos(k*x) ) # Temperature in the liquid for heat flux condtion
+        else:
+            T['g'] += 1 - z - b*np.sinh(k*(1-z)) / (k*np.cosh(k)) * np.cos(k*x) 
     else:
-        write, initial_timestep = solver.load_state(f'{params["save_dir"]}/chkp/'+'chkp_s{:1d}.h5'.format(restart))
+        load_file = f'{params["save_dir"]}/chkp/chkp_s' + str(restart) + ".h5"
+        write, initial_timestep = solver.load_state(load_file)
         file_handler_mode = 'append'
+        # solver.stop_sim_time += stop_sim_time
+        
     
+    # print("Here")
     # ---------------------------------------------------------------------------------
     # ----------------- Setup checkpoint and diagnostic tasks -------------------------
     # ---------------------------------------------------------------------------------
@@ -388,39 +434,49 @@ def run_horizontal_conv_sim(params):
 
     snapshots.add_task(vorticity, name='vorticity')
     snapshots.add_task(u, name='velocity')
-    snapshots.add_task(f, name='phase')
     snapshots.add_task(T, name='temperature')
+    if phase: snapshots.add_task(f, name='phase')
 
     # 0D and 1D snapshots of space-integral quantities
     snapshots_integ = solver.evaluator.add_file_handler(f'{params["save_dir"]}/snaps', 
                                                   iter=snap_iter_0D, max_writes=max_writes, mode=file_handler_mode)
+    
+    if phase:
+        snapshots_integ.add_task(f_profile,     name='f x')
+        snapshots_integ.add_task(V_ice,         name='vol ice')
+        snapshots_integ.add_task(V_liq,         name='vol liq')
+        snapshots_integ.add_task(KE_ice,        name='KE ice')
+        snapshots_integ.add_task(KE_liq,        name='KE liq')
+        snapshots_integ.add_task(S1(d3.grad(T),  f,  domain=domain1D, 
+                                 F=ice_ocean_interface_extract, ten=(coords,)),     
+                                 name='grad(T) ice-ocean')
 
     snapshots_integ.add_task(heat_flux_top, name='heat flux top x')
     snapshots_integ.add_task(heat_flux_bot, name='heat flux bot x')
-    snapshots_integ.add_task(f_profile,     name='f x')
-    snapshots_integ.add_task(V_ice,         name='vol ice')
-    snapshots_integ.add_task(V_liq,         name='vol liq')
-    snapshots_integ.add_task(KE_ice,        name='KE ice')
     snapshots_integ.add_task(KE,            name='KE')
-    snapshots_integ.add_task(KE_liq,        name='KE liq')
     snapshots_integ.add_task(Nu_RB,         name='Nu')
-    snapshots_integ.add_task(S1(d3.grad(T),  f,  domain=domain1D, F=ice_ocean_interface_extract, ten=(coords,)), name='grad(T) ice-ocean')
-
+    snapshots_integ.add_task(T_b,           name='T bot')
+    
     int_time = (avg_time-1) * timestep # The -1 is important! 
 
     # 2D time averages
     tavg = solver.evaluator.add_file_handler(f'{params["save_dir"]}/diags2D', iter=avg_time, mode=file_handler_mode)
     tavg.add_task(S1(avg_u,     avg_u0,     domain=domain2D, ten=(coords,))/int_time, name='velocity avg')
     tavg.add_task(S1(avg_T,     avg_T0,     domain=domain2D)/int_time, name='temperature avg')
-    tavg.add_task(S1(avg_f,     avg_f0,     domain=domain2D)/int_time, name='phase avg')
+    if phase: tavg.add_task(S1(avg_f,     avg_f0,     domain=domain2D)/int_time, name='phase avg')
     tavg.add_task(S1(avg_uT,    avg_uT0,    domain=domain2D, ten=(coords,))/int_time, name='adv flux temp avg')
     tavg.add_task(S1(avg_gradT, avg_gradT0, domain=domain2D, ten=(coords,))/int_time, name='diff flux temp avg')
 
     # 0D and 1D time averages of space-integral quantities
     tavg_integ = solver.evaluator.add_file_handler(f'{params["save_dir"]}/diags', iter=avg_time, mode=file_handler_mode)
-    tavg_integ.add_task(S1(avg_KE,           avg_KE0,           domain=domain0D)/int_time, name='KE avg')
-    tavg_integ.add_task(S1(avg_KE_ice,       avg_KE_ice0,       domain=domain0D)/int_time, name='KE avg ice')
-    tavg_integ.add_task(S1(avg_KE_liq,       avg_KE_liq0,       domain=domain0D)/int_time, name='KE avg liq')
+
+    if phase:
+        tavg_integ.add_task(S1(avg_KE_ice,       avg_KE_ice0,       domain=domain0D)/int_time, name='KE avg ice')
+        tavg_integ.add_task(S1(avg_KE_liq,       avg_KE_liq0,       domain=domain0D)/int_time, name='KE avg liq')
+        tavg_integ.add_task(S1(avg_f_x,      avg_f_x0)/int_time,        name='f avg x')
+        tavg_integ.add_task(S1(avg_gradT_io, avg_gradT_io0,  domain=domain1D, ten=(coords,))/int_time, name='grad(T) avg ice-ocean')
+    
+    tavg_integ.add_task(S1(avg_KE,           avg_KE0,           domain=domain0D)/int_time, name='KE avg') 
     tavg_integ.add_task(S1(avg_Nu,           avg_Nu0,           domain=domain0D)/int_time, name='Nu avg')
     tavg_integ.add_task(S1(avg_Re,           avg_Re0,           domain=domain0D)/int_time, name='Re avg')
     tavg_integ.add_task(S1(avg_dTdz,         avg_dTdz0,         domain=domain0D)/int_time, name='dTdz avg')
@@ -428,15 +484,12 @@ def run_horizontal_conv_sim(params):
     tavg_integ.add_task(S1(avg_dTdz_b,       avg_dTdz_b0,       domain=domain0D)/int_time, name='dTdz avg b')
     tavg_integ.add_task(S1(int_u_top_left,   int_u_top_left0,   domain=domain0D)/int_time, name='u top left int')
     tavg_integ.add_task(S1(avg_Tdiff,        avg_Tdiff0,        domain=domain0D)/int_time, name='T diff avg')
-
-    tavg_integ.add_task(S1(avg_f_x,      avg_f_x0)/int_time,        name='f avg x')
+    tavg_integ.add_task(S1(avg_T_b,          avg_T_b0,          domain=domain0D)/int_time, name='T bot avg')
+    
     tavg_integ.add_task(S1(avg_dTdz_t_x, avg_dTdz_t_x0)/int_time,   name='heat flux top avg x')
     tavg_integ.add_task(S1(avg_dTdz_b_x, avg_dTdz_b_x0)/int_time,   name='heat flux bot avg x')
-
     tavg_integ.add_task(S1(avg_dTdz_out, avg_dTdz_out0, domain=domain1D_z)/int_time, name='dTdz avg out')
     tavg_integ.add_task(S1(avg_dTdz_in,  avg_dTdz_in0,  domain=domain1D_z)/int_time, name='dTdz avg in')
-
-    tavg_integ.add_task(S1(avg_gradT_io, avg_gradT_io0,  domain=domain1D, ten=(coords,))/int_time, name='grad(T) avg ice-ocean')
 
     # ---------------------------------------------------------------------------------
     # -------------------------- Begin time integration -------------------------------
@@ -452,11 +505,14 @@ def run_horizontal_conv_sim(params):
                 # 0D averages are only handled by process 0
                 if rank == 0:
                     avg_KE0[:,:] = avg_KE['g']
-                    avg_KE_ice0[:,:] = avg_KE_ice['g']
-                    avg_KE_liq0[:,:] = avg_KE_liq['g']
+
+                    if phase:
+                        avg_KE_ice0[:,:] = avg_KE_ice['g']
+                        avg_KE_liq0[:,:] = avg_KE_liq['g']
 
                     avg_dTdz_t0[:,:] = avg_dTdz_t['g']
                     avg_dTdz_b0[:,:] = avg_dTdz_b['g']
+                    avg_T_b0[:,:]    = avg_T_b['g']
 
                     avg_Tdiff0[:,:] = avg_Tdiff['g']
 
@@ -465,8 +521,15 @@ def run_horizontal_conv_sim(params):
                     avg_dTdz0[:,:] = avg_dTdz['g']
                     int_u_top_left0[:,:] = int_u_top_left['g']
                 
-                avg_f_x.change_scales(dealias)
-                avg_f_x0[:] = avg_f_x['g']
+                if phase:
+                    avg_f_x.change_scales(dealias)
+                    avg_f_x0[:] = avg_f_x['g']
+
+                    avg_f.change_scales(dealias)
+                    avg_f0[:,:] = avg_f['g'][:,:]
+
+                    avg_gradT_io.change_scales(dealias)
+                    avg_gradT_io0[:, :, :] = avg_gradT_io['g']
 
                 avg_dTdz_t_x.change_scales(dealias)
                 avg_dTdz_t_x0[:] = avg_dTdz_t_x['g']
@@ -486,14 +549,10 @@ def run_horizontal_conv_sim(params):
                 avg_T.change_scales(dealias)
                 avg_T0[:,:] = avg_T['g']
 
-                avg_f.change_scales(dealias)
-                avg_f0[:,:] = avg_f['g'][:,:]
-
                 avg_gradT.change_scales(dealias)
                 avg_gradT0[:, :, :] = avg_gradT['g']
 
-                avg_gradT_io.change_scales(dealias)
-                avg_gradT_io0[:, :, :] = avg_gradT_io['g']
+                
 
             if solver.iteration % print_step == 0:
                 log = [f'it {solver.iteration:d}',
