@@ -124,18 +124,25 @@ function get_snapshot(suite, N, itr; itr2=nothing)
         times = []
         for sim_file in files
             h5open(sim_file, "r") do data
+                println("$sim_file found")
+                println(length(data["tasks/KE liq"][:,:,:]))
+                println(length(data["scales/sim_time"]))
                 push!(KE_liq, data["tasks/KE liq"][1,1,:])
                 push!(KE_ice, data["tasks/KE ice"][1,1,:])
                 push!(vol_liq, data["tasks/vol liq"][1,1,:])
-                push!(times, data["scales/sim_time"][:])
-                println(size(mean(data["tasks/heat flux top x"][1, :, :], dims=1)))
+                # if length(data["tasks/KE liq"][1,1,:]) != length(data["scales/sim_time"][:]) 
+                #     push!(times, data["scales/sim_time"][1:end-1])
+                # else
+                    push!(times, data["scales/sim_time"][:])
+                # end
+                # println(size(mean(data["tasks/heat flux top x"][1, :, :], dims=1)))
                 push!(avg_heat_flux, mean(data["tasks/heat flux top x"][1, :, :], dims=1)[1,:])
             end
         end
         d["KE liq"] = KE_liq
         d["KE ice"] = KE_ice
         d["vol liq"] = vol_liq
-        d["times"] = KE_liq
+        d["times"] = times
         d["avg heat flux"] = avg_heat_flux
 
 
@@ -226,18 +233,21 @@ function plot_latest(suite, N, itr)
     lines!(axTop, x, qt)
 
     cmap = join_colormaps(reverse(ColorSchemes.ice), ColorSchemes.seaborn_rocket_gradient, 0.2; xmin=0, xmax=Tmax)
-    hm1 = heatmap!(ax1, x, z, T', colormap = cmap, colorrange=(0.0, Tmax))
-    contour!(ax1,x, z, T'; levels = 0.2:0.025:round(Tmax, digits=1), color = (:black, 0.75), linewidth = 0.5)
+    hm1 = heatmap!(ax1, x, z, T', colormap = cmap, colorrange=(0.0, Tmax), rasterize=true)
+    contour!(ax1,x, z, T'; levels = 0.2:(Tmax-0.2)/7:Tmax, color = (:black, 0.75), linewidth = 0.3)
 
     # f = 0.5 contour
-    contour!(ax1,x, z, f'; levels = [0.5], color = (:white, 0.75), linewidth = 0.7)
+    contour!(ax1,x, z, f'; levels = [0.5], color = (:white, 0.75), linewidth = 0.5)
 
-    hm2 = heatmap!(ax2, x, z, ζ'; colormap = :coolwarm)
+    hm2 = heatmap!(ax2, x, z, ζ'; colormap = :coolwarm, rasterize=true)
 
     skipz = 64
     skipx = 16
     
-    arrows2d!(ax2, x[1:skipx:end], z[1:skipz:end], U[1:skipz:end, 1:skipx:end]', V[1:skipz:end, 1:skipx:end]', lengthscale=5e-4)
+    mag = maximum(sqrt.(U.^2 .+ V.^2))
+    U ./= mag
+    V ./= mag
+    arrows2d!(ax2, x[1:skipx:end], z[1:skipz:end], U[1:skipz:end, 1:skipx:end]', V[1:skipz:end, 1:skipx:end]', lengthscale=0.1)
 
     # # -------------------------------------------------------------------
     # # Colorbars
@@ -260,26 +270,32 @@ function plot_latest(suite, N, itr)
     times = data["times"]
     
     for i in eachindex(KE_liq)
-        # println(KE[i])
+        println(size(KE_liq[i]), " ", size(times[i]))
         lines!(ax_lke, times[i], KE_liq[i])
-        lines!(ax_ratio, times[i], KE_ice[i]./KE_liq[i])
+        lines!(ax_ratio, times[i], abs.(KE_ice[i])./KE_liq[i])
         lines!(ax_lvol, times[i], vol_liq[i] ./ Lx[N+1])
         lines!(ax_flux, times[i], avg_heat_flux[i])
         # lines!(ax_lke, times[i], KE_ice[i])
-        println(KE_ice[i]./KE_liq[i])
+        # println(KE_ice[i]./KE_liq[i])
     end
 
     
     # println("Saved: $save_name")
 
-    ylims!(axTop, 0.0, 2.0)
+    ylims!(axTop, 0.0, maximum(qt)*1.1)
+
+    xlims!(ax1, 0, Lx[N+1])
+    xlims!(ax2, 0, Lx[N+1])
+    xlims!(axTop, 0, Lx[N+1])
 
     rowsize!(g1, 1, 50.0)
     rowgap!(g1, 1, 10.0)
     rowgap!(g1, 2, 10.0)
 
     save_name = @sprintf("./plots/%s_%03d_%04d.png", suite, N, itr)
-    save( save_name, fig, px_per_inch=4)
+    save( save_name, fig, px_per_unit=4)
+
+    # println(KE_liq)
 
     return data, fig
 end
