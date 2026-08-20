@@ -1,6 +1,6 @@
 using ColorSchemes
 using HDF5
-using GLMakie
+using CairoMakie
 using CSV
 using DataFrames
 using Printf
