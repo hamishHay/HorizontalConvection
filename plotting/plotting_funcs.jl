@@ -278,7 +278,8 @@ function plot_latest(suite, N, itr)
     rowgap!(g1, 1, 10.0)
     rowgap!(g1, 2, 10.0)
 
-    save( @sprintf("./plots/%s_%03d_%04.png", suite, N, itr), px_per_inch=4)
+    save_name = @sprintf("./plots/%s_%03d_%04d.png", suite, N, itr)
+    save( save_name, fig, px_per_inch=4)
 
     return data, fig
 end
