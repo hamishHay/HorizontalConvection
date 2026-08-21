@@ -51,7 +51,11 @@ def optimum_beta(Ra, θm, eps, c=0.435, m=8.5):
     return beta_opt, zinf
 
 def get_E_RaF(RaF): # Currently only laminar
-    return 0.32 * RaF**0.57
+    if RaF < 1e8:
+        return 0.32 * RaF**0.57
+    
+    return 0.012 * RaF**0.75
+
 
 def optimum_m_RaF(Hups, a=1.3, b=3.52):
     # Htilde  = 1 - get_eqlb_z(θm, Ra)
