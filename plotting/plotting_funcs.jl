@@ -125,15 +125,14 @@ function get_snapshot(suite, N, itr; itr2=nothing)
         for sim_file in files
             h5open(sim_file, "r") do data
                 println("$sim_file found")
-                println(length(data["tasks/KE liq"][:,:,:]))
-                println(length(data["scales/sim_time"]))
+
                 push!(KE_liq, data["tasks/KE liq"][1,1,:])
                 push!(KE_ice, data["tasks/KE ice"][1,1,:])
                 push!(vol_liq, data["tasks/vol liq"][1,1,:])
                 # if length(data["tasks/KE liq"][1,1,:]) != length(data["scales/sim_time"][:]) 
                 #     push!(times, data["scales/sim_time"][1:end-1])
                 # else
-                    push!(times, data["scales/sim_time"][:])
+                push!(times, data["scales/sim_time"][:])
                 # end
                 # println(size(mean(data["tasks/heat flux top x"][1, :, :], dims=1)))
                 push!(avg_heat_flux, mean(data["tasks/heat flux top x"][1, :, :], dims=1)[1,:])
@@ -210,9 +209,9 @@ function plot_latest(suite, N, itr)
 
     axTop = Axis(g1[1,1], ylabel = "Surface\nheat flux", xticksvisible=false, xticklabelsvisible=false, xminorgridvisible=true, xminorticks=IntervalsBetween(4))
 
-    ax1 = Axis(g1[2, 1], aspect = DataAspect(), ylabel = L"$z$", xticksvisible=false, xticklabelsvisible=false)
+    ax1 = Axis(g1[2:3, 1], aspect = DataAspect(), ylabel = L"$z$", xticksvisible=false, xticklabelsvisible=false)
 
-    ax2 = Axis(g1[3, 1], aspect = DataAspect(), xlabel = L"$x$", ylabel = L"$z$", xminorticksvisible=true, xminorticks=IntervalsBetween(4))
+    ax2 = Axis(g1[4:5, 1], aspect = DataAspect(), xlabel = L"$x$", ylabel = L"$z$", xminorticksvisible=true, xminorticks=IntervalsBetween(4))
 
     ax_lke = Axis(g2[1,1], ylabel="Liquid KE", xticklabelsvisible=false)
     ax_ratio = Axis(g2[1,2], ylabel="Ice--Liquid\nKE ratio", xticklabelsvisible=false)
@@ -254,14 +253,14 @@ function plot_latest(suite, N, itr)
     # # -------------------------------------------------------------------
 
     # Colorbar(g1[1, 2], hm1, label = "Temperature θ", height = Relative(0.7), ticks=0.0:0.1:round(Tmax, digits=1) )
-    Colorbar(g1[2, 2], hm1, label = "Temperature θ", height = Relative(0.7), ticks=0.0:0.1:round(Tmax, digits=1) )
-    Colorbar(g1[3, 2], hm2, label = "Vorticity", height = Relative(0.7) )
+    cb2=Colorbar(g1[3, 2], colormap=reverse(ColorSchemes.ice), colorrange=(0.0, 0.2), ticks=[0.0, 0.1, 0.2], valign=:bottom, height = Relative(0.7) )
+    cb =Colorbar(g1[2, 2], colormap=ColorSchemes.seaborn_rocket_gradient, colorrange=(0.2, Tmax), valign=:bottom)
+    Colorbar(g1[4:5, 2], hm2, label = "Vorticity", height = Relative(0.7) )
 
-    # save(
-    #     save_name,
-    #     fig;
-    #     px_per_unit = 1
-    # )
+    cb.alignmode = Mixed(top = 4)
+    cb2.alignmode = Mixed(bottom = 4)
+    cbar_label = Label(g1[3:2, 2, Right()], "Temperature θ", rotation = pi/2, padding=(30, 0, 0, 0))
+
 
     KE_liq = data["KE liq"]
     KE_ice = data["KE ice"]
@@ -270,7 +269,6 @@ function plot_latest(suite, N, itr)
     times = data["times"]
     
     for i in eachindex(KE_liq)
-        println(size(KE_liq[i]), " ", size(times[i]))
         lines!(ax_lke, times[i], KE_liq[i])
         lines!(ax_ratio, times[i], abs.(KE_ice[i])./KE_liq[i])
         lines!(ax_lvol, times[i], vol_liq[i] ./ Lx[N+1])
@@ -290,7 +288,9 @@ function plot_latest(suite, N, itr)
 
     rowsize!(g1, 1, 50.0)
     rowgap!(g1, 1, 10.0)
-    rowgap!(g1, 2, 10.0)
+    rowgap!(g1, 3, 10.0)
+    rowgap!(g1, 2, 0)
+    
 
     save_name = @sprintf("./plots/%s_%03d_%04d.png", suite, N, itr)
     save( save_name, fig, px_per_unit=4)
