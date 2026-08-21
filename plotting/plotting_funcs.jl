@@ -7,10 +7,10 @@ using Printf
 using Statistics
 using Glob
 
-function latest_snapshot_file(suite, N)
-    snapdir = @sprintf("./data/%s/%03d/snaps2D", suite, N)
+function latest_snapshot_file(suite, N, fname)
+    snapdir = @sprintf("./data/%s/%03d/%s", suite, N,fname)
 
-    files = sort(glob("snaps2D_s*.h5", snapdir))
+    files = sort(glob(fname*"_s*.h5", snapdir))
     
     isempty(files) && error("No snapshot files found in $snapdir")
 
@@ -38,7 +38,7 @@ end
 
 function get_snapshot(suite, N, itr; itr2=nothing)
 
-        dfile_num = latest_snapshot_file(suite, N)
+        dfile_num = latest_snapshot_file(suite, N, "snaps2D")
 
         d = Dict()
         sim_file = @sprintf("./data/%s/%03d/snaps2D/snaps2D_s%d.h5", suite, N, dfile_num)
@@ -63,7 +63,7 @@ function get_snapshot(suite, N, itr; itr2=nothing)
 
             t = data["scales/sim_time"][itr:itr2]
             sim_itr = data["scales/iteration"][itr:itr2]
-            @printf("Reading from time %1.4f--%1.4f, sim iterations %d--%d", t[1], t[end], sim_itr[1], sim_itr[end])
+            @printf("Reading from time %1.4f--%1.4f, sim iterations %d--%d\n", t[1], t[end], sim_itr[1], sim_itr[end])
 
             # Velocity components
             U = data["tasks/velocity"][:, :, 1, itr:itr2]
@@ -85,29 +85,31 @@ function get_snapshot(suite, N, itr; itr2=nothing)
             d["t"]=t
         end
 
+        dfile_num = latest_snapshot_file(suite, N, "snaps")
         sim_file = @sprintf("./data/%s/%03d/snaps/snaps_s%d.h5", suite, N, dfile_num)
         h5open(sim_file, "r") do data
-
+            println("here")
             itr>0 ? nothing : error("Iteration should be greater than 0")
             println("$sim_file found")
 
             max_iter = length(data["scales/sim_time"][:])
 
+            itr = max_iter
+            itr2 = itr # THIS IS A PROBLEM. THIS SHOULD BE SET ELSEWHERE
             if isnothing(itr2)
                 itr2 = itr
             elseif itr2=="end"
                 itr2 = max_iter
             end
+
             itr2 <= max_iter ? println("Maximum iteration is $(max_iter)") : error("Iteration $(itr2) is outside of range (0-$(max_iter))")
 
             scales = data["scales"]
 
             x = find_scale(scales, "x")
-
             t = data["scales/sim_time"][itr:itr2]
             sim_itr = data["scales/iteration"][itr:itr2]
-            @printf("Reading from time %1.4f--%1.4f, sim iterations %d--%d", t[1], t[end], sim_itr[1], sim_itr[end])
-
+            @printf("Reading from time %1.4f--%1.4f, sim iterations %d--%d\n", t[1], t[end], sim_itr[1], sim_itr[end])
             F = data["tasks/heat flux top x"][1, :, itr:itr2]
             
             d["qt"] = F
@@ -197,6 +199,7 @@ function plot_latest(suite, N, itr)
     qt = data["qt"][:,1]
 
     qt ./= mean(qt)
+    ζm = maximum( abs.(extrema(ζ)) )
     
     # -------------------------------------------------------------------
     # Figure
@@ -238,7 +241,7 @@ function plot_latest(suite, N, itr)
     # f = 0.5 contour
     contour!(ax1,x, z, f'; levels = [0.5], color = (:white, 0.75), linewidth = 0.5)
 
-    hm2 = heatmap!(ax2, x, z, ζ'; colormap = :coolwarm, rasterize=true)
+    hm2 = heatmap!(ax2, x, z, ζ'; colormap = :coolwarm, rasterize=true, colorrange=(-ζm, ζm))
 
     skipz = 64
     skipx = 16
@@ -254,12 +257,13 @@ function plot_latest(suite, N, itr)
 
     # Colorbar(g1[1, 2], hm1, label = "Temperature θ", height = Relative(0.7), ticks=0.0:0.1:round(Tmax, digits=1) )
     cb2=Colorbar(g1[3, 2], colormap=reverse(ColorSchemes.ice), colorrange=(0.0, 0.2), ticks=[0.0, 0.1, 0.2], valign=:bottom, height = Relative(0.7) )
-    cb =Colorbar(g1[2, 2], colormap=ColorSchemes.seaborn_rocket_gradient, colorrange=(0.2, Tmax), valign=:bottom)
+    cb =Colorbar(g1[2, 2], colormap=ColorSchemes.seaborn_rocket_gradient, colorrange=(0.2, Tmax), valign=:bottom, 
+                 ticks=0.2:round((Tmax-0.2)/3, digits=2):round(Tmax,digits=1))
     Colorbar(g1[4:5, 2], hm2, label = "Vorticity", height = Relative(0.7) )
 
     cb.alignmode = Mixed(top = 4)
     cb2.alignmode = Mixed(bottom = 4)
-    cbar_label = Label(g1[3:2, 2, Right()], "Temperature θ", rotation = pi/2, padding=(30, 0, 0, 0))
+    cbar_label = Label(g1[3:2, 2, Right()], "Temperature θ", rotation = pi/2, padding=(25, 0, 0, 0))
 
 
     KE_liq = data["KE liq"]
