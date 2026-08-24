@@ -336,8 +336,8 @@ def run_horizontal_conv_sim(params):
 
     if phase:
         problem.add_equation("dt(f) - ft = 0")
-        problem.add_equation("(5/6)*(1/S)*ft - γ*div(grad(f))        + tau_phas_eq = -ϵ**(-2)*f*(1-f)*(γ*(1-2*f) + (T-Tm-a*(zf-z0)))")
-        problem.add_equation("dt(T) - div(grad(T)) - (1/S)*ft              + tau_temp_eq = - (1-f*adv)*u@grad(T) + T*u@grad(f)*adv")
+        problem.add_equation("(5/6)*S*dt(f) - γ*div(grad(f))        + tau_phas_eq = -ϵ**(-2)*f*(1-f)*(γ*(1-2*f) + (T-Tm-a*(zf-z0)))")
+        problem.add_equation("dt(T) - div(grad(T)) - S*dt(f)              + tau_temp_eq = - (1-f*adv)*u@grad(T) + T*u@grad(f)*adv")
         problem.add_equation("dt(u)/Pr - div(grad(u)) + grad(p) -Ra*T*ez + tau_mom_eq  = - u@grad(u)/Pr - (1/(ϵ*β)**2)*f*u")
     else:
         problem.add_equation("dt(T) - div(grad(T))               + tau_temp_eq = - u@grad(T)")
