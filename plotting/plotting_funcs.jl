@@ -90,6 +90,7 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
 
         d = Dict()
         sim_file = @sprintf("./data/%s/%03d/snaps2D/snaps2D_s%d.h5", suite, N, dfile_num)
+        @printf("Loading iteration %03d from ./data/%s/%03d/snaps2D/snaps2D_s%d.h5\n", itr, suite, N, dfile_num)
         snapshot_itr = 1
         h5open(sim_file, "r") do data
 
@@ -152,8 +153,10 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
                     sim_itr = data["scales/iteration"][itr:itr2]
                     @printf("Reading from time %1.4f--%1.4f, sim iterations %d--%d, save index %d--%d\n", t[1], t[end], sim_itr[1], sim_itr[end], itr, itr2)
                     F = data["tasks/heat flux top x"][1, :, itr:itr2]
+                    fx = data["tasks/f x"][1, :, itr:itr2]
                     
                     d["qt"] = F
+                    d["fx"] = fx
 
                     found = true
                 end 
@@ -247,29 +250,31 @@ function plot_latest(suite, N, itr; s=nothing)
     ζ = dropdims(data["ζ"], dims=3)
     snap_time = data["t"][1]
     qt = data["qt"][:,1]
+    fx = data["fx"][:,1]
 
-    qt ./= mean(qt)
+    # qt ./= mean(qt)
     ζm = maximum( abs.(extrema(ζ)) )
     
     # -------------------------------------------------------------------
     # Figure
     # -------------------------------------------------------------------
 
-    fig = Figure( size = (1500 + (Lx[N+1] - 5)/5 * 500, 500) )
+    fig = Figure( size = (1500 + (Lx[N+1] - 5)/5 * 500, 600) )
 
     g1 = fig[1:3, 1] = GridLayout()
     g2 = fig[1:3, 2] = GridLayout()
 
     axTop = Axis(g1[1,1], ylabel = "Surface\nheat flux", xticksvisible=false, xticklabelsvisible=false, xminorgridvisible=true, xminorticks=IntervalsBetween(4))
+    axMid = Axis(g1[2,1], ylabel = "Ice thickness", xticksvisible=false, xticklabelsvisible=false, xminorgridvisible=true, xminorticks=IntervalsBetween(4))
 
-    ax1 = Axis(g1[2:3, 1], aspect = DataAspect(), ylabel = L"$z$", xticksvisible=false, xticklabelsvisible=false)
+    ax1 = Axis(g1[3:4, 1], aspect = DataAspect(), ylabel = L"$z$", xticksvisible=false, xticklabelsvisible=false)
 
-    ax2 = Axis(g1[4:5, 1], aspect = DataAspect(), xlabel = L"$x$", ylabel = L"$z$", xminorticksvisible=true, xminorticks=IntervalsBetween(4))
+    ax2 = Axis(g1[5:6, 1], aspect = DataAspect(), xlabel = L"$x$", ylabel = L"$z$", xminorticksvisible=true, xminorticks=IntervalsBetween(4))
 
-    ax_lke = Axis(g2[1,1], ylabel="Liquid KE", xticklabelsvisible=false)
-    ax_ratio = Axis(g2[1,2], ylabel="Ice--Liquid\nKE ratio", xticklabelsvisible=false)
-    ax_lvol = Axis(g2[2,1], ylabel="Liquid volume")
-    ax_flux = Axis(g2[2,2], ylabel="Average surface flux")
+    ax_lke = Axis(g2[1,1], ylabel="Liquid KE", xticklabelsvisible=false, yscale=log10)
+    ax_ratio = Axis(g2[2,1], ylabel="Ice--Liquid\nKE ratio", xticklabelsvisible=false, yscale=log10)
+    ax_lvol = Axis(g2[3,1], ylabel="Liquid volume")
+    ax_flux = Axis(g2[4,1], ylabel="Average surface flux", xlabel="time")
 
 
     linkxaxes!(axTop, ax1)
@@ -283,6 +288,7 @@ function plot_latest(suite, N, itr; s=nothing)
     Tmin = minimum(T[.!isnan.(T)])
 
     lines!(axTop, x, qt)
+    lines!(axMid, x, fx)
 
     cmap = join_colormaps(reverse(ColorSchemes.ice), ColorSchemes.seaborn_rocket_gradient, 0.2; xmin=0, xmax=Tmax)
     hm1 = heatmap!(ax1, x, z, T', colormap = cmap, colorrange=(0.0, Tmax), rasterize=true)
@@ -307,14 +313,14 @@ function plot_latest(suite, N, itr; s=nothing)
     # # -------------------------------------------------------------------
 
     # Colorbar(g1[1, 2], hm1, label = "Temperature θ", height = Relative(0.7), ticks=0.0:0.1:round(Tmax, digits=1) )
-    cb2=Colorbar(g1[3, 2], colormap=reverse(ColorSchemes.ice), colorrange=(0.0, 0.2), ticks=[0.0, 0.1, 0.2], valign=:bottom, height = Relative(0.7) )
-    cb =Colorbar(g1[2, 2], colormap=ColorSchemes.seaborn_rocket_gradient, colorrange=(0.2, Tmax), valign=:bottom, 
+    cb2=Colorbar(g1[4, 2], colormap=reverse(ColorSchemes.ice), colorrange=(0.0, 0.2), ticks=[0.0, 0.1, 0.2], valign=:bottom, height = Relative(0.7) )
+    cb =Colorbar(g1[3, 2], colormap=ColorSchemes.seaborn_rocket_gradient, colorrange=(0.2, Tmax), valign=:bottom, 
                  ticks=0.2:round((Tmax-0.2)/3, digits=2):round(Tmax,digits=1))
-    Colorbar(g1[4:5, 2], hm2, label = "Vorticity", height = Relative(0.7) )
+    Colorbar(g1[5:6, 2], hm2, label = "Vorticity", height = Relative(0.7) )
 
     cb.alignmode = Mixed(top = 4)
     cb2.alignmode = Mixed(bottom = 4)
-    cbar_label = Label(g1[3:2, 2, Right()], "Temperature θ", rotation = pi/2, padding=(25, 0, 0, 0))
+    cbar_label = Label(g1[4:3, 2, Right()], "Temperature θ", rotation = pi/2, padding=(25, 0, 0, 0))
 
 
     KE_liq = data["KE liq"]
@@ -340,22 +346,30 @@ function plot_latest(suite, N, itr; s=nothing)
         end
     end
 
-    ylims!(axTop, 0.0, maximum(qt)*1.1)
-    flux_lim = vcat(avg_heat_flux...)
+    ylims!(axTop, 0.0, minimum(qt)*1.1)
+    length(avg_heat_flux) > 1 ? start=2 : start=1
+    flux_lim = vcat(avg_heat_flux[start:end]...)
     lke_lim = vcat(KE_liq...)
+    
+    
     ylims!(ax_flux, mean(flux_lim) - 5std(flux_lim), mean(flux_lim) + 5std(flux_lim))
-    ylims!(ax_lke, mean(lke_lim) - 10std(lke_lim), mean(lke_lim) + 10std(lke_lim))
+    ylims!(ax_lke, 0.2mean(lke_lim), mean(lke_lim) + 3std(lke_lim))
 
     xlims!(ax1, 0, Lx[N+1])
     xlims!(ax2, 0, Lx[N+1])
     xlims!(axTop, 0, Lx[N+1])
+    xlims!(axMid, 0, Lx[N+1])
 
     
-    rowsize!(g1, 1, 50.0)
-    rowgap!(g1, 1, 10.0)
-    rowgap!(g1, 3, 10.0)
-    rowgap!(g1, 2, 0)
-    colsize!(fig.layout, 2, 500)
+    # rowsize!(g1, 1, 40.0)
+    # rowsize!(g1, 2, 40.0)
+    # rowgap!(g1, 1, 10.0)
+    # rowgap!(g1, 2, 10.0)
+    # rowgap!(g1, 4, -10)
+    # rowgap!(g1, 3, 0)
+    colsize!(fig.layout, 2, 450)
+
+    # ax2.alignmode = Mixed(bottom = 0)
     
     
     save_name = @sprintf("./plots/%s_%03d_s%02d_%04d.png", suite, N, s, itr)
@@ -364,9 +378,31 @@ function plot_latest(suite, N, itr; s=nothing)
     return data, fig
 end
 
+function get_s_itrs(suite, N; s=nothing)
+    snapdir = @sprintf("./data/%s/%03d/%s", suite, N,"snaps2D")
+
+    files = sort(glob("snaps2D_s*.h5", snapdir))
+
+
+    itrs = [1:length(h5open(file)["scales/iteration/"][1:end-1]) for file in  files]
+    snums = [parse(Int, split(split(file, "s")[end], ".")[1]) for file in files]
+    ss = [snums[i]*ones(Int, length(itrs[i])) for i in eachindex(snums)]
+
+    if !isnothing(s)
+        itrs = itrs[snums .>= s]
+        ss    = ss[snums .>= s]
+    end
+
+    return vcat(itrs...), vcat(ss...)
+end
+
 function plot_animation(suite, N, itrs;
                      filename = "./plots/$(suite)_$(N).mp4",
-                     framerate = 10)
+                     framerate = 10,
+                     vort_lim = nothing,
+                     temp_lim = nothing, 
+                     s1 = nothing,
+                     s2 = nothing)
 
     # -------------------------------------------------------------------
     # Read parameters
@@ -383,7 +419,9 @@ function plot_animation(suite, N, itrs;
     # Get first snapshot -- used to construct the figure
     # -------------------------------------------------------------------
 
-    itr0 = first(itrs)
+    s_itrs, ss = get_s_itrs(suite, N; s=s1)
+
+    itr0 = last(s_itrs)
     data = get_snapshot(suite, N, itr0)
 
     x, z = data["x"], data["z"]
@@ -396,15 +434,23 @@ function plot_animation(suite, N, itrs;
 
     snap_time = data["t"][1]
 
-    qt = copy(data["qt"][:, 1])
-    qt ./= mean(qt)
+    qt = data["qt"][:, 1]
+    # qt ./= mean(qt)
 
     # Use fixed colour limits over the entire animation.
     # This prevents the colours from changing between frames.
     Tmax = maximum(T[.!isnan.(T)])
     Tmin = minimum(T[.!isnan.(T)])
 
-    ζm = maximum(abs.(extrema(ζ)))
+    if isnothing(vort_lim)
+        m = maximum(abs.(extrema(ζ)))
+        vort_lim = (-0.1m, 0.1m)
+    end
+
+    if isnothing(temp_lim)
+        m = maximum(abs.(extrema(T)))
+        temp_lim = (0.0, m)
+    end
 
     # -------------------------------------------------------------------
     # Figure
@@ -434,14 +480,12 @@ function plot_animation(suite, N, itrs;
     # -------------------------------------------------------------------
     # Observables
     # -------------------------------------------------------------------
-
     T_obs  = Observable(T)
     ζ_obs  = Observable(ζ)
     f_obs  = Observable(f)
     U_obs  = Observable(U)
     V_obs  = Observable(V)
     qt_obs = Observable(qt)
-
 
     # Transpose the matrices through lifts so that they update correctly.
     T_plot = @lift $T_obs'
@@ -451,7 +495,6 @@ function plot_animation(suite, N, itrs;
     # -------------------------------------------------------------------
     # Temperature / heat-flux plots
     # -------------------------------------------------------------------
-
     
     qt_line = lines!(axTop, x, qt_obs; color = :black)
 
@@ -462,14 +505,14 @@ function plot_animation(suite, N, itrs;
         xmin = 0,
         xmax = Tmax)
 
-    hm1 = heatmap!( ax1, x, z, T_plot, colormap = cmap, colorrange = (0.0, Tmax), rasterize = true)
+    hm1 = heatmap!( ax1, x, z, T_plot, colormap = cmap, colorrange = temp_lim, rasterize = true)
 
     contour!( ax1, x, z, T_plot; levels = 0.2:(Tmax - 0.2)/7:Tmax, color = (:black, 0.75), linewidth = 0.3)
 
     # f = 0.5 contour
     contour!( ax1, x, z, f_plot; levels = [0.5], color = (:white, 0.75), linewidth = 0.5)
 
-    hm2 = heatmap!( ax2, x, z, ζ_plot; colormap = :coolwarm, rasterize = true, colorrange = (-ζm * 0.1, ζm * 0.1))
+    hm2 = heatmap!( ax2, x, z, ζ_plot; colormap = :coolwarm, rasterize = true, colorrange = vort_lim)
 
     contour!( ax2, x, z, f_plot; levels = [0.5], color = (:black, 0.75), linewidth = 0.75)
 
@@ -510,6 +553,7 @@ function plot_animation(suite, N, itrs;
     # -------------------------------------------------------------------
     scat_time = nothing
     scat_ke   = nothing
+    scat_ker   = nothing
     scat_vol   = nothing 
     scat_flux   = nothing 
     KE_liq = data["KE liq"]
@@ -532,11 +576,12 @@ function plot_animation(suite, N, itrs;
 
             scat_time = Observable([times[i][snap_iter]])
             scat_ke   = Observable([KE_liq[i][snap_iter]])
+            scat_ker = Observable([abs.(KE_ice[i][snap_iter]) ./ KE_liq[i][snap_iter]])
             scat_vol   = Observable([vol_liq[i][snap_iter]] ./ Lx[N+1])
             scat_flux   = Observable([avg_heat_flux[i][snap_iter]])
             scatter!( ax_lke, scat_time, scat_ke, color = (:red, 0.7) )
 
-            scatter!( ax_ratio, times[i][snap_iter], abs.(KE_ice[i][snap_iter]) ./ KE_liq[i][snap_iter], color = (:red, 0.7) )
+            scatter!( ax_ratio, scat_time, scat_ker, color = (:red, 0.7) )
 
             scatter!( ax_lvol, scat_time,  scat_vol, color = (:red, 0.7) )
 
@@ -548,7 +593,7 @@ function plot_animation(suite, N, itrs;
     # Fixed axis limits
     # -------------------------------------------------------------------
 
-    ylims!(axTop, 0.0, maximum(qt) * 1.1)
+    ylims!(axTop, 0.0,  minimum(qt) * 1.1)
     
     xlims!(ax1, 0, Lx[N+1])
     xlims!(ax2, 0, Lx[N+1])
@@ -560,42 +605,27 @@ function plot_animation(suite, N, itrs;
     rowgap!(g1, 2, 0)
     colsize!(fig.layout, 2, 500)
 
-    # -------------------------------------------------------------------
-    # Animation
-    # -------------------------------------------------------------------
-
-    record(
-        fig,
-        filename,
-        itrs;
-        framerate = framerate
-    ) do itr
+    
+    
+    record(fig, filename, itrs; framerate = framerate) do i
 
         # ---------------------------------------------------------------
         # Read snapshot for this iteration
         # ---------------------------------------------------------------
 
-        data = get_snapshot(suite, N, itr; no_series=true)
-        # data2 = get_time_series(suite, N; itr1=itr, itr2=itr)
+        itr = s_itrs[i]
+        s   = ss[i]
+
+        data = get_snapshot(suite, N, itr; dfile_num=s, no_series=true)
 
         T_new = dropdims(data["T"], dims=3)
         V_new = dropdims(data["V"], dims=3)
         U_new = dropdims(data["U"], dims=3)
         f_new = dropdims(data["f"], dims=3)
         ζ_new = dropdims(data["ζ"], dims=3)
+        qt_new = data["qt"][:, 1]
 
         snap_time = data["t"][1]
-
-        
-
-        # qt_new = copy(data2["heat flux x"][:, 1])
-        # qt_new ./= mean(qt_new)
-
-        # qt_obs[] = qt_new
-
-        # ---------------------------------------------------------------
-        # Update fields
-        # ---------------------------------------------------------------
 
         T_obs[] = T_new
         V_obs[] = V_new
@@ -603,18 +633,20 @@ function plot_animation(suite, N, itrs;
         V_obs[] = V_new ./ maximum(sqrt.(U_new.^2 .+ V_new.^2))
         f_obs[] = f_new
         ζ_obs[] = ζ_new
+        qt_obs[] = qt_new
 
-        if snap_time >= extrema(times[end])[1] &&
-           snap_time <= extrema(times[end])[2]
+        if snap_time >= extrema(times[s])[1] &&
+           snap_time <= extrema(times[s])[2]
 
-            snap_iter = findmin(abs.(times[end] .- snap_time))[2]
+            snap_iter = findmin(abs.(times[s] .- snap_time))[2]
 
         end
 
-        scat_time[] = [times[end][snap_iter]]
-        scat_ke[] = [KE_liq[end][snap_iter]]
-        scat_vol[] = [vol_liq[end][snap_iter] ./ Lx[N+1] ]
-        scat_flux[] = [avg_heat_flux[end][snap_iter] ]
+        scat_time[] = [times[s][snap_iter]]
+        scat_ke[] = [KE_liq[s][snap_iter]]
+        scat_ker[] = [abs.(KE_ice[s][snap_iter]) ./ KE_liq[s][snap_iter]]
+        scat_vol[] = [vol_liq[s][snap_iter] ./ Lx[N+1] ]
+        scat_flux[] = [avg_heat_flux[s][snap_iter] ]
         # qt_obs[] = qt_new
 
         # ---------------------------------------------------------------
