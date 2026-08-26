@@ -341,7 +341,10 @@ function plot_latest(suite, N, itr; s=nothing)
     end
 
     ylims!(axTop, 0.0, maximum(qt)*1.1)
-    ylims!(ax_flux, -1.5, -0.5)
+    flux_lim = vcat(avg_heat_flux...)
+    lke_lim = vcat(KE_liq...)
+    ylims!(ax_flux, mean(flux_lim) - 5std(flux_lim), mean(flux_lim) + 5std(flux_lim))
+    ylims!(ax_lke, mean(lke_lim) - 10std(lke_lim), mean(lke_lim) + 10std(lke_lim))
 
     xlims!(ax1, 0, Lx[N+1])
     xlims!(ax2, 0, Lx[N+1])
@@ -546,7 +549,7 @@ function plot_animation(suite, N, itrs;
     # -------------------------------------------------------------------
 
     ylims!(axTop, 0.0, maximum(qt) * 1.1)
-
+    
     xlims!(ax1, 0, Lx[N+1])
     xlims!(ax2, 0, Lx[N+1])
     xlims!(axTop, 0, Lx[N+1])
