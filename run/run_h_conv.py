@@ -7,18 +7,22 @@ import numpy as np
 import pandas as pd
 import logging
 import sys
-sys.path.append("../../src/")
+sys.path.append("../../../src/")
 import os
 root = logging.root
 for h in root.handlers: h.setLevel("INFO") 
 logger = logging.getLogger(__name__)
 import horizontal_convection
 from optimum_beta import optimum_beta_RaF#, get_eqlb_z
+import glob
 
 
 series = sys.argv[1]
 index = int(sys.argv[2])
 save_dir = f'data/{series}'
+
+def sort_checkpoint_files(files):
+    return sorted(files, key=lambda f: int(f.split("_s")[-1].split(".")[0]))
 
 def create_dataframe(param_dic):
     """Convert dictionary of experiment parameters into multiindex of params for each experiment.
@@ -59,18 +63,18 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 
 
-Ras = [1e5]#, 1e9]
-dts = [2e-6]#, 1e-9]
-stop_time = [10.0]
+Ras = [1e8]#, 1e9]
+dts = [1e-7]#, 1e-9]
+stop_time = [40.0]
 
 param_list = {
-    'Lx': [5],
+    'Lx': [10],
     'Lz': [1],
     ('Tm', 'z0'): ([0.2, 0.4],[0.8, 0.6]),
     # 'z0': [.8],
     ('Ra', 'timestep', 'stop_sim_time') : (Ras, dts, stop_time), 
     'Pr' : [1.0],
-    'S' : [0.5],
+    'S' : [10.0],
     'ε' : [2e-3], # Need to explore/read about these. 
     'γ' : [2e-3],
     'δ' : [1e-2],
@@ -78,7 +82,7 @@ param_list = {
     'm' : [0.],
     'n' : [0.],
     'a' : [0.],
-    'b' : [0., 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    'b' : [0., 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.0],
     'timestepper':['SBDF2'],
     # 'timestep': [1e-4],
     # 'stop_sim_time':[0.4, 0.4],
@@ -87,13 +91,13 @@ param_list = {
     'avg_time': [500],
     'print_step':[200],
     'max_writes':[10000],
-    'nx':[512],
+    'nx':[1024],
     'nz':[1024],
     'dealias':[1.5],
     'save_dir': [save_dir],
     'script':[0],
     'adv': [0],
-    'restart': ["/home/hcfch1/scratch/HorizontalConvection/lcl/A5_Ra4/data/Ra4/000/chkp/chkp_s11.h5"],
+    'restart': [0],#"/home/hcfch1/scratch/HorizontalConvection/lcl/A5_Ra4/data/Ra4/000/chkp/chkp_s11.h5"],
     'chkp_time': [1000]
 }
 
@@ -109,25 +113,33 @@ params['save_dir'] = ["data/{:s}/{:s}".format(params.loc[i]['sim_suite'], params
 
 # series_restart = 'ch-3D-comparison-1'
 # params['restart_file'] = [last_save_file(f'{series_restart}-{i:0>3d}') for i in range(len(params))]
-
+restart_root = "/home/hcfch1/scratch/HorizontalConvection/lcl/A10/Ra7/data/Ra7/"
 for i in range(len(params)):
     Ra, θm, eps = (params['Ra'][i], params['Tm'][i], params['ε'][i])
 
-    P = params["stop_sim_time"][i]
+    P = 0.001#params["stop_sim_time"][i]
     dt = params["timestep"][i]
 
     params.loc[i, 'β'] = optimum_beta_RaF(Ra, θm, eps)
 
-    params.loc[i, 'snap_iter_2D'] = round(P / 100 / dt)
+    params.loc[i, 'snap_iter_2D'] = round(P / 10 / dt)
 
     params.loc[i, 'snap_iter_0D'] = round(P / 1000 / dt)
 
-    params.loc[i, 'avg_time'] = round(P / 10 / dt)    # average every 10% of the end time 
+    params.loc[i, 'avg_time'] = round(P / 1 / dt)    # average every 10% of the end time 
 
-    params.loc[i, 'chkp_time'] = round(P / 20 / dt)
+    params.loc[i, 'chkp_time'] = round(P / 10 / dt)
 
     if isinstance(params.loc[i, 'restart'], str):
-        params.loc[i, 'stop_sim_time'] += P
+        params.loc[i, 'stop_sim_time'] += 10.0#params["stop_sim_time"][i] 
+
+    try:
+        restart_file = sort_checkpoint_files(glob.glob(restart_root + "{:03d}".format(11) + "/chkp/*.h5"))[-1]
+        params.loc[i, 'restart'] = restart_file
+    except:
+        params.loc[i, 'restart'] = 0
+    # print(i, restart_root + "{:03d}".format(i) + "/chkp/*.h5", sorted(glob.glob(restart_root + "{:03d}".format(i) + "/chkp/*.h5")))
+    # print(i, restart_file)
 
 params.to_csv(f'./parameters/parameters-{series}.csv')
 
