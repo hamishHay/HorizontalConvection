@@ -98,8 +98,8 @@ def run_horizontal_conv_sim(params):
 
     if phase:
         f = dist.Field(name='f', bases=(xbasis,zbasis))
-        ft = dist.Field(name='ft', bases=(xbasis,zbasis))
-        variables += [f, ft]
+        # ft = dist.Field(name='ft', bases=(xbasis,zbasis))
+        variables += [f]
 
     # ---------------------------------------------------------------------------------
     # ------------------------- diagnostic quantities ---------------------------------
@@ -166,9 +166,16 @@ def run_horizontal_conv_sim(params):
     problem.add_equation("div(u) + tau_div_eq = 0")
 
     if phase:
-        problem.add_equation("dt(f) - ft = 0")
-        problem.add_equation("(5/6)*S*dt(f) - γ*div(grad(f))        + tau_phas_eq = -ϵ**(-2)*f*(1-f)*(γ*(1-2*f) + (T-Tm-a*(zf-z0)))")
-        problem.add_equation("dt(T) - div(grad(T)) - S*dt(f)              + tau_temp_eq = - (1-f*adv)*u@grad(T) + T*u@grad(f)*adv")
+        # problem.add_equation("dt(f) - ft = 0")
+        if a > 0:
+            problem.add_equation("(5/6)*S*dt(f) - γ*div(grad(f))        + tau_phas_eq = -ϵ**(-2)*f*(1-f)*(γ*(1-2*f) + (T-Tm-a*(zf-z0)))")
+        else:
+            # problem.add_equation("(5/6)*S*dt(f) - γ*div(grad(f))        + tau_phas_eq = -ϵ**(-2)*f*(1-f)*(γ*(1-2*f) + T-Tm)")
+             problem.add_equation("(5/6)*S*dt(f) - γ*div(grad(f))  + ϵ**(-2)*f*(γ - Tm)   + tau_phas_eq = -ϵ**(-2)*f*(T - f*(3*γ + T - Tm) + 2*f**2*γ)")
+        if adv:
+            problem.add_equation("dt(T) - div(grad(T)) - S*dt(f)              + tau_temp_eq = - (1-f)*u@grad(T) + T*u@grad(f)")
+        else:
+            problem.add_equation("dt(T) - div(grad(T)) - S*dt(f)              + tau_temp_eq = - (1-f)*u@grad(T)")
         problem.add_equation("dt(u)/Pr - div(grad(u)) + grad(p) -Ra*T*ez + tau_mom_eq  = - u@grad(u)/Pr - (1/(ϵ*β)**2)*f*u")
     else:
         problem.add_equation("dt(T) - div(grad(T))               + tau_temp_eq = - u@grad(T)")
