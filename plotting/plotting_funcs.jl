@@ -16,7 +16,9 @@ function latest_snapshot_file(suite, N, fname)
 
     # println(parse(Int, Convertsplit(split(files[end], "s")[end], ".")[1]))
 
-    return parse(Int, split(split(files[end], "s")[end], ".")[1])  
+    d = sort([parse(Int, split(split(file, "s")[end], ".")[1]) for file in files])
+
+    return d[end]
 end
 
 function find_scale(scales, name)
@@ -134,9 +136,10 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
         end
 
         dfile_num = latest_snapshot_file(suite, N, "snaps")
+        println(dfile_num)
+        found = false
         for i in dfile_num:-1:1
             sim_file = @sprintf("./data/%s/%03d/snaps/snaps_s%d.h5", suite, N, i)
-            found = false
             h5open(sim_file, "r") do data
                 itr>0 ? nothing : error("Iteration should be greater than 0")
                 println("$sim_file found")
@@ -166,6 +169,9 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
             if found 
                 break
             end
+        end
+        if !found 
+            println("Can't fight where the 2D snapshot should be")
         end
 
         if !no_series
