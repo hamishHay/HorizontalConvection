@@ -591,3 +591,6 @@ def run_horizontal_conv_sim(params):
     except:
         logger.error('Exception raised, triggering end of main loop.')
         raise       
+
+    finally:
+        solver.log_stats()

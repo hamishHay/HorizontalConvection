@@ -16,7 +16,9 @@ function latest_snapshot_file(suite, N, fname)
 
     # println(parse(Int, Convertsplit(split(files[end], "s")[end], ".")[1]))
 
-    return parse(Int, split(split(files[end], "s")[end], ".")[1])  
+    d = sort([parse(Int, split(split(file, "s")[end], ".")[1]) for file in files])
+
+    return d[end]
 end
 
 function find_scale(scales, name)
@@ -120,6 +122,7 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
             vort = data["tasks/vorticity"][:,:,itr:itr2]
             f = data["tasks/phase"][:, :, itr:itr2]
             T = data["tasks/temperature"][:, :, itr:itr2]
+            qn = data["tasks/heat flux interface"][1, :, itr:itr2]
 
             d["U"]=U 
             d["V"]=V
@@ -129,12 +132,14 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
             d["x"]=x
             d["z"]=z
             d["t"]=t
+            d["qn"]=qn
         end
 
         dfile_num = latest_snapshot_file(suite, N, "snaps")
+        println(dfile_num)
+        found = false
         for i in dfile_num:-1:1
             sim_file = @sprintf("./data/%s/%03d/snaps/snaps_s%d.h5", suite, N, i)
-            found = false
             h5open(sim_file, "r") do data
                 itr>0 ? nothing : error("Iteration should be greater than 0")
                 println("$sim_file found")
@@ -164,6 +169,9 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
             if found 
                 break
             end
+        end
+        if !found 
+            println("Can't fight where the 2D snapshot should be")
         end
 
         if !no_series
@@ -250,6 +258,7 @@ function plot_latest(suite, N, itr; s=nothing)
     ζ = dropdims(data["ζ"], dims=3)
     snap_time = data["t"][1]
     qt = data["qt"][:,1]
+    qn = data["qn"][:,1]
     fx = data["fx"][:,1]
 
     # qt ./= mean(qt)
@@ -264,7 +273,7 @@ function plot_latest(suite, N, itr; s=nothing)
     g1 = fig[1:3, 1] = GridLayout()
     g2 = fig[1:3, 2] = GridLayout()
 
-    axTop = Axis(g1[1,1], ylabel = "Surface\nheat flux", xticksvisible=false, xticklabelsvisible=false, xminorgridvisible=true, xminorticks=IntervalsBetween(4))
+    axTop = Axis(g1[1,1], ylabel = "Heat flux", xticksvisible=false, xticklabelsvisible=false, xminorgridvisible=true, xminorticks=IntervalsBetween(4))
     axMid = Axis(g1[2,1], ylabel = "Ice thickness", xticksvisible=false, xticklabelsvisible=false, xminorgridvisible=true, xminorticks=IntervalsBetween(4))
 
     ax1 = Axis(g1[3:4, 1], aspect = DataAspect(), ylabel = L"$z$", xticksvisible=false, xticklabelsvisible=false)
@@ -287,7 +296,9 @@ function plot_latest(suite, N, itr; s=nothing)
     Tmax = maximum(T[.!isnan.(T)])
     Tmin = minimum(T[.!isnan.(T)])
 
-    lines!(axTop, x, qt)
+    lines!(axTop, x, qt; label="surface")
+    lines!(axTop, x, qn; label="interface")
+    Legend(g1[1, 2], axTop, tellwidth=false, margin=(60, 0, 0, 0))
     lines!(axMid, x, fx)
 
     cmap = join_colormaps(reverse(ColorSchemes.ice), ColorSchemes.seaborn_rocket_gradient, 0.2; xmin=0, xmax=Tmax)
@@ -346,27 +357,24 @@ function plot_latest(suite, N, itr; s=nothing)
         end
     end
 
-    ylims!(axTop, 0.0, minimum(qt)*1.1)
+    ylims!(axTop, 0.0, min(minimum(qt), minimum(qn))*1.1)
+    # ylims!(axTop, 0.0, *1.1)
     length(avg_heat_flux) > 1 ? start=2 : start=1
     flux_lim = vcat(avg_heat_flux[start:end]...)
     lke_lim = vcat(KE_liq...)
     
     
     ylims!(ax_flux, mean(flux_lim) - 5std(flux_lim), mean(flux_lim) + 5std(flux_lim))
-    ylims!(ax_lke, 0.2mean(lke_lim), mean(lke_lim) + 3std(lke_lim))
+    # ke_lower = mean(lke_lim) - 3std(lke_lim)
+    # ke_lower = ke_lower < 0 ? 0.9minimum(lke_lim) : ke_lower 
+    # ylims!(ax_lke, ke_lower, mean(lke_lim) + 3std(lke_lim))
 
     xlims!(ax1, 0, Lx[N+1])
     xlims!(ax2, 0, Lx[N+1])
     xlims!(axTop, 0, Lx[N+1])
     xlims!(axMid, 0, Lx[N+1])
 
-    
-    # rowsize!(g1, 1, 40.0)
-    # rowsize!(g1, 2, 40.0)
-    # rowgap!(g1, 1, 10.0)
-    # rowgap!(g1, 2, 10.0)
-    # rowgap!(g1, 4, -10)
-    # rowgap!(g1, 3, 0)
+
     colsize!(fig.layout, 2, 450)
 
     # ax2.alignmode = Mixed(bottom = 0)
@@ -396,6 +404,7 @@ function get_s_itrs(suite, N; s=nothing)
     return vcat(itrs...), vcat(ss...)
 end
 
+
 function plot_animation(suite, N, itrs;
                      filename = "./plots/$(suite)_$(N).mp4",
                      framerate = 10,
@@ -421,8 +430,14 @@ function plot_animation(suite, N, itrs;
 
     s_itrs, ss = get_s_itrs(suite, N; s=s1)
 
-    itr0 = last(s_itrs)
-    data = get_snapshot(suite, N, itr0)
+    if last(itrs) > last(s_itrs)
+        error(@sprintf("Selected too many iterations! Max is %d", last(s_itrs)))
+    end
+
+    
+
+    itr0 = last(itrs)
+    data = get_snapshot(suite, N, s_itrs[last(itrs)]; dfile_num=ss[last(itrs)])
 
     x, z = data["x"], data["z"]
 
@@ -635,11 +650,11 @@ function plot_animation(suite, N, itrs;
         ζ_obs[] = ζ_new
         qt_obs[] = qt_new
 
-        if snap_time >= extrema(times[s])[1] &&
-           snap_time <= extrema(times[s])[2]
-
-            snap_iter = findmin(abs.(times[s] .- snap_time))[2]
-
+        snap_iter = 1
+        for j in eachindex(times)
+            if snap_time >= extrema(times[j])[1] &&  snap_time <= extrema(times[j])[2]
+                snap_iter = findmin(abs.(times[j] .- snap_time))[2]            
+            end
         end
 
         scat_time[] = [times[s][snap_iter]]
@@ -647,7 +662,7 @@ function plot_animation(suite, N, itrs;
         scat_ker[] = [abs.(KE_ice[s][snap_iter]) ./ KE_liq[s][snap_iter]]
         scat_vol[] = [vol_liq[s][snap_iter] ./ Lx[N+1] ]
         scat_flux[] = [avg_heat_flux[s][snap_iter] ]
-        # qt_obs[] = qt_new
+        qt_obs[] = qt_new
 
         # ---------------------------------------------------------------
         # Update title / frame information
