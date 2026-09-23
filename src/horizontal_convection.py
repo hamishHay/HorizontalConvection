@@ -40,7 +40,7 @@ def run_horizontal_conv_sim(params):
 
     diagnostics = True
 
-    phase = 1
+    phase = params['phase on']
     # Numerical parameters
     nx, nz =     params['nx'], params['nz']
     timestep =   params['timestep']
