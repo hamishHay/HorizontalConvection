@@ -152,7 +152,8 @@ def build_initial_condition(no_ice_checkpoint, no_ice_diags_dir,
     ax2.set_aspect("equal")
 
     ax3.plot(x, h_x)
-    plt.show()
+    
+    fig.savefig("remapped_conditions.png", dpi=400, bbox_inches="tight")
 
     return out_file
 
