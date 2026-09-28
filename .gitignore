@@ -1,1 +1,5 @@
 lcl
+src/__pycache__/diagnostics.cpython-312.pyc
+.vscode/settings.json
+src/__pycache__/horizontal_convection.cpython-312.pyc
+*.pyc 
