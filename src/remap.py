@@ -57,18 +57,23 @@ def ice_thickness_from_flux(F_x, Lz, Tm, T_top=0.0, h_min=0.02, h_max=None,
     """
     F_x = np.maximum(np.abs(F_x), 1e-8)
 
-    # print(F_x)
     Fmean = np.mean(F_x)
-    Fpert = Fmean - F_x
-    Fpert[Fpert > 0.2] *= 0.85
+    Fpert = F_x - Fmean
+    Fpert *= 0.85   # Apply scaling factor to reduce ice thickness variations
+                    # which seems to help with 2D effects
+    F_x = Fmean + Fpert
 
-    F_x = Fmean - Fpert
-    
-    h_mean = (Tm - T_top) * np.mean(1/ F_x)
-    h_x = (Tm - T_top) / F_x
-    h_x_mean = np.mean(h_x)
-    h_x_deviation = h_x - h_x_mean
-    h_x = h_mean + h_x_deviation
+    B = 1 / F_x 
+    Bmean = np.mean(B)
+    Bpert = B - Bmean 
+
+    Hmean = (Tm - T_top) * Bmean
+    Hpert = (Tm - T_top) * Bpert 
+
+    h_x = Hmean + Hpert
+
+    print("Average ice thickness is", Hmean)
+
     if h_max is None:
         h_max = 0.9 * Lz
     h_x = np.clip(h_x, h_min, h_max)
