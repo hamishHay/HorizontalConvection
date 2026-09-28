@@ -84,7 +84,7 @@ function get_time_series(suite, N; itr1=nothing, itr2=nothing, d=Dict(), sim_ite
     return d
 end
 
-function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=nothing)
+function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=nothing, phase=true)
 
         if isnothing(dfile_num)
             dfile_num = latest_snapshot_file(suite, N, "snaps2D")
@@ -120,9 +120,14 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
             U = data["tasks/velocity"][:, :, 1, itr:itr2]
             V = data["tasks/velocity"][:, :, 2, itr:itr2]
             vort = data["tasks/vorticity"][:,:,itr:itr2]
-            f = data["tasks/phase"][:, :, itr:itr2]
+            phase ? f = data["tasks/phase"][:, :, itr:itr2] : f = nothing
             T = data["tasks/temperature"][:, :, itr:itr2]
-            qn = data["tasks/heat flux interface"][1, :, itr:itr2]
+            qn = nothing
+            try
+                phase ? qn = data["tasks/heat flux interface"][1, :, itr:itr2] : qn = nothing
+            catch e 
+            end
+
 
             d["U"]=U 
             d["V"]=V
@@ -158,7 +163,7 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
                     sim_itr = data["scales/iteration"][itr:itr2]
                     @printf("Reading from time %1.4f--%1.4f, sim iterations %d--%d, save index %d--%d\n", t[1], t[end], sim_itr[1], sim_itr[end], itr, itr2)
                     F = data["tasks/heat flux top x"][1, :, itr:itr2]
-                    fx = data["tasks/f x"][1, :, itr:itr2]
+                    phase ? fx = data["tasks/f x"][1, :, itr:itr2] : fx = nothing
                     
                     d["qt"] = F
                     d["fx"] = fx
@@ -188,16 +193,20 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
                 h5open(sim_file, "r") do data
                     println("$sim_file found")
 
-                    push!(KE_liq, data["tasks/KE liq"][1,1,:])
-                    push!(KE_ice, data["tasks/KE ice"][1,1,:])
-                    push!(vol_liq, data["tasks/vol liq"][1,1,:])
-                    # if length(data["tasks/KE liq"][1,1,:]) != length(data["scales/sim_time"][:]) 
-                    #     push!(times, data["scales/sim_time"][1:end-1])
-                    # else
+                    phase ? push!(KE_liq, data["tasks/KE liq"][1,1,:]) : push!(KE_liq, data["tasks/KE"][1,1,:])
+
+                    if phase 
+                        push!(KE_ice, data["tasks/KE ice"][1,1,:])
+                        push!(vol_liq, data["tasks/vol liq"][1,1,:])
+                    end
+                        # if length(data["tasks/KE liq"][1,1,:]) != length(data["scales/sim_time"][:]) 
+                        #     push!(times, data["scales/sim_time"][1:end-1])
+                        # else
                     push!(times, data["scales/sim_time"][:])
                     # end
                     # println(size(mean(data["tasks/heat flux top x"][1, :, :], dims=1)))
                     push!(avg_heat_flux, mean(data["tasks/heat flux top x"][1, :, :], dims=1)[1,:])
+                        
                 end
             end
             d["KE liq"] = KE_liq
@@ -211,9 +220,61 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
         return d
 end
 
-# function get_snapshot(sim_file, itr1, itr2)
-#     return get_snapshot(sim_file, itr1; itr2=itr2)
-# end
+
+function get_timeavg(suite, N, itr; itr2=nothing, no_series = false, dfile_num=nothing)
+
+        if isnothing(dfile_num)
+            dfile_num = latest_snapshot_file(suite, N, "diags2D")
+        end
+
+        d = Dict()
+        sim_file = @sprintf("./data/%s/%03d/diags2D/diags2D_s%d.h5", suite, N, dfile_num)
+        @printf("Loading iteration %03d from ./data/%s/%03d/diags2D/diags2D_s%d.h5\n", itr, suite, N, dfile_num)
+        snapshot_itr = 1
+        h5open(sim_file, "r") do data
+
+            itr>0 ? nothing : error("Iteration should be greater than 0")
+            println("$sim_file found")
+
+            max_iter = length(data["scales/sim_time"][:])
+
+            if isnothing(itr2)
+                itr2 = itr
+            elseif itr2=="end"
+                itr2 = max_iter
+            end
+            itr2 <= max_iter ? println("Maximum iteration is $(max_iter)") : error("Iteration $(itr2) is outside of range (0-$(max_iter))")
+
+            scales = data["scales"]
+
+            x = find_scale(scales, "x")
+            z = find_scale(scales, "z")
+
+            t = data["scales/sim_time"][itr:itr2]
+            snapshot_itr = data["scales/iteration"][itr:itr2]
+            @printf("Reading from time %1.4f--%1.4f, sim iterations %d--%d\n", t[1], t[end], snapshot_itr[1], snapshot_itr[end])
+
+            U = mean(data["tasks/velocity avg"][:, :, 1, itr:itr2], dims=3)
+            V = mean(data["tasks/velocity avg"][:, :, 2, itr:itr2], dims=3)
+            # vort = mean(data["tasks/vorticity"][:,:,itr:itr2], dims=3)
+            f = mean(data["tasks/phase avg"][:, :, itr:itr2], dims=3)
+            T = mean(data["tasks/temperature avg"][:, :, itr:itr2], dims=3)
+            # qn = data["tasks/heat flux interface"][1, :, itr:itr2]
+
+            d["U"]=U 
+            d["V"]=V
+            d["f"]=f
+            d["T"]=T
+            # d["ζ"]=vort
+            d["x"]=x
+            d["z"]=z
+            d["t"]=t
+            # d["qn"]=qn
+        end
+
+     
+        return d
+end
 
 function join_colormaps(cmap1, cmap2, xmid; xmin=0, xmax=1, n=1024)
     xlen = xmax - xmin 
@@ -228,7 +289,7 @@ function join_colormaps(cmap1, cmap2, xmid; xmin=0, xmax=1, n=1024)
     return vcat(c1, c2)
 end
 
-function plot_latest(suite, N, itr; s=nothing)
+function plot_latest(suite, N, itr; s=nothing, phase=true)
 
     # # -------------------------------------------------------------------
     # # Read parameters
@@ -245,7 +306,7 @@ function plot_latest(suite, N, itr; s=nothing)
     # # Snapshot file
     # # -------------------------------------------------------------------
 
-    data = get_snapshot(suite, N, itr; dfile_num=s)
+    data = get_snapshot(suite, N, itr; dfile_num=s, phase=phase)
     if isnothing(s)
         s = latest_snapshot_file(suite, N, "snaps2D")
     end
@@ -254,12 +315,21 @@ function plot_latest(suite, N, itr; s=nothing)
     T = dropdims(data["T"], dims=3)
     V = dropdims(data["V"], dims=3)
     U = dropdims(data["U"], dims=3)
-    f = dropdims(data["f"], dims=3)
+    phase ? f = dropdims(data["f"], dims=3) : f = nothing
     ζ = dropdims(data["ζ"], dims=3)
     snap_time = data["t"][1]
     qt = data["qt"][:,1]
-    qn = data["qn"][:,1]
-    fx = data["fx"][:,1]
+
+    if phase
+        qn = nothing
+        if !isnothing(data["qn"]) 
+            qn = data["qn"][:,1]
+        end
+        fx = data["fx"][:,1]
+    else
+        qn = nothing 
+        fx = nothing 
+    end
 
     # qt ./= mean(qt)
     ζm = maximum( abs.(extrema(ζ)) )
@@ -297,19 +367,28 @@ function plot_latest(suite, N, itr; s=nothing)
     Tmin = minimum(T[.!isnan.(T)])
 
     lines!(axTop, x, qt; label="surface")
-    lines!(axTop, x, qn; label="interface")
+    if !isnothing(qn) 
+        lines!(axTop, x, qn; label="interface")
+    end
     Legend(g1[1, 2], axTop, tellwidth=false, margin=(60, 0, 0, 0))
-    lines!(axMid, x, fx)
+    if !isnothing(fx) 
+        lines!(axMid, x, fx)
+    end
 
     cmap = join_colormaps(reverse(ColorSchemes.ice), ColorSchemes.seaborn_rocket_gradient, 0.2; xmin=0, xmax=Tmax)
     hm1 = heatmap!(ax1, x, z, T', colormap = cmap, colorrange=(0.0, Tmax), rasterize=true)
     contour!(ax1,x, z, T'; levels = 0.2:(Tmax-0.2)/7:Tmax, color = (:black, 0.75), linewidth = 0.3)
 
-    # f = 0.5 contour
-    contour!(ax1,x, z, f'; levels = [0.5], color = (:white, 0.75), linewidth = 0.5)
+    # f = 0.5 contourd
+    if !isnothing(f) 
+        contour!(ax1,x, z, f'; levels = [0.5], color = (:white, 0.75), linewidth = 0.5)
+    end
 
     hm2 = heatmap!(ax2, x, z, ζ'; colormap = :coolwarm, rasterize=true, colorrange=(-ζm*0.1, ζm*0.1))
-    contour!(ax2,x, z, f'; levels = [0.5], color = (:black, 0.75), linewidth = 0.75)
+    
+    if !isnothing(f)
+        contour!(ax2,x, z, f'; levels = [0.5], color = (:black, 0.75), linewidth = 0.75)
+    end
 
     skipz = 64
     skipx = 16
@@ -343,21 +422,27 @@ function plot_latest(suite, N, itr; s=nothing)
     for i in eachindex(KE_liq)
         
         lines!(ax_lke, times[i], KE_liq[i])
-        lines!(ax_ratio, times[i], abs.(KE_ice[i])./KE_liq[i])
-        lines!(ax_lvol, times[i], vol_liq[i] ./ Lx[N+1])
+        if !isempty(KE_ice)
+            lines!(ax_ratio, times[i], abs.(KE_ice[i])./KE_liq[i])
+            lines!(ax_lvol, times[i], vol_liq[i] ./ Lx[N+1])
+        end
         lines!(ax_flux, times[i], avg_heat_flux[i])
 
         snap_iter = 1
         if snap_time >= extrema(times[i])[1] && snap_time <= extrema(times[i])[2]
             snap_iter = findmin(abs.(times[i] .- snap_time))[2] 
             scatter!(ax_lke, times[i][snap_iter], KE_liq[i][snap_iter], color=(:red, 0.7))
-            scatter!(ax_ratio, times[i][snap_iter], abs.(KE_ice[i][snap_iter])./KE_liq[i][snap_iter], color=(:red, 0.7))
-            scatter!(ax_lvol, times[i][snap_iter], vol_liq[i][snap_iter] ./ Lx[N+1], color=(:red, 0.7))
             scatter!(ax_flux, times[i][snap_iter], avg_heat_flux[i][snap_iter], color=(:red, 0.7))
+            if !isempty(KE_ice)
+                scatter!(ax_ratio, times[i][snap_iter], abs.(KE_ice[i][snap_iter])./KE_liq[i][snap_iter], color=(:red, 0.7))
+                scatter!(ax_lvol, times[i][snap_iter], vol_liq[i][snap_iter] ./ Lx[N+1], color=(:red, 0.7))
+            end
         end
     end
 
-    ylims!(axTop, 0.0, min(minimum(qt), minimum(qn))*1.1)
+    if !isnothing(qn)
+        ylims!(axTop, 0.0, min(minimum(qt), minimum(qn))*1.1)
+    end
     # ylims!(axTop, 0.0, *1.1)
     length(avg_heat_flux) > 1 ? start=2 : start=1
     flux_lim = vcat(avg_heat_flux[start:end]...)
@@ -382,6 +467,126 @@ function plot_latest(suite, N, itr; s=nothing)
     
     save_name = @sprintf("./plots/%s_%03d_s%02d_%04d.png", suite, N, s, itr)
     save( save_name, fig, px_per_unit=4)
+    # save_name = @sprintf("./plots/%s_%03d_s%02d_%04d.pdf", suite, N, s, itr)
+    # save( save_name, fig, px_per_unit=4)
+
+
+    return data, fig
+end
+
+function plot_latest_avg(suite, N, itr; s=nothing, itr2=nothing)
+
+    # # -------------------------------------------------------------------
+    # # Read parameters
+    # # -------------------------------------------------------------------
+
+    parameter_file = "./parameters/parameters-$(suite).csv"
+    df = CSV.read(parameter_file, DataFrame)
+
+    Tm = df.Tm
+    Ra = df.Ra
+    Lx = df.Lx
+    
+    # # -------------------------------------------------------------------
+    # # Snapshot file
+    # # -------------------------------------------------------------------
+
+    if isnothing(itr2)
+        itr2 = itr
+    end
+
+    data = get_timeavg(suite, N, itr; dfile_num=s, itr2=itr2)
+    if isnothing(s)
+        s = latest_snapshot_file(suite, N, "diags2D")
+    end
+
+    x, z= data["x"], data["z"]
+    T = dropdims(data["T"], dims=3)
+    V = dropdims(data["V"], dims=3)
+    U = dropdims(data["U"], dims=3)
+    f = dropdims(data["f"], dims=3)
+    # ζ = dropdims(data["ζ"], dims=3)
+    snap_time = data["t"][1]
+    # qt = data["qt"][:,1]
+    # qn = data["qn"][:,1]
+    # fx = data["fx"][:,1]
+
+    # qt ./= mean(qt)
+    # ζm = maximum( abs.(extrema(ζ)) )
+    
+    # -------------------------------------------------------------------
+    # Figure
+    # -------------------------------------------------------------------
+
+    fig = Figure( size = (1500 + (Lx[N+1] - 5)/5 * 500, 600) )
+
+    g1 = fig[1:3, 1] = GridLayout()
+    # g2 = fig[1:3, 2] = GridLayout()
+
+    axTop = Axis(g1[1,1], ylabel = "Heat flux", xticksvisible=false, xticklabelsvisible=false, xminorgridvisible=true, xminorticks=IntervalsBetween(4))
+    axMid = Axis(g1[2,1], ylabel = "Ice thickness", xticksvisible=false, xticklabelsvisible=false, xminorgridvisible=true, xminorticks=IntervalsBetween(4))
+
+    ax1 = Axis(g1[3:4, 1], aspect = DataAspect(), ylabel = L"$z$", xticksvisible=false, xticklabelsvisible=false)
+
+    ax2 = Axis(g1[5:6, 1], aspect = DataAspect(), xlabel = L"$x$", ylabel = L"$z$", xminorticksvisible=true, xminorticks=IntervalsBetween(4))
+
+
+    linkxaxes!(axTop, ax1)
+    linkxaxes!(ax1, ax2)
+
+    # # -------------------------------------------------------------------
+    # # Temperature plot
+    # # -------------------------------------------------------------------
+
+    Tmax = maximum(T[.!isnan.(T)])
+    Tmin = minimum(T[.!isnan.(T)])
+
+    println(Tmax, ", ", Tmin)
+
+    # lines!(axTop, x, qt; label="surface")
+    # lines!(axTop, x, qn; label="interface")
+    # Legend(g1[1, 2], axTop, tellwidth=false, margin=(60, 0, 0, 0))
+    # lines!(axMid, x, fx)
+
+    cmap = join_colormaps(reverse(ColorSchemes.ice), ColorSchemes.seaborn_rocket_gradient, 0.2; xmin=0, xmax=Tmax)
+    hm1 = heatmap!(ax1, x, z, T', colormap = cmap, colorrange=(0.0, Tmax), rasterize=true)
+    contour!(ax1,x, z, T'; levels = 0.2:(Tmax-0.2)/7:Tmax, color = (:black, 0.75), linewidth = 0.3)
+
+    # f = 0.5 contour
+    contour!(ax1,x, z, f'; levels = [0.5], color = (:white, 0.75), linewidth = 0.5)
+
+    # hm2 = heatmap!(ax2, x, z, ζ'; colormap = :coolwarm, rasterize=true, colorrange=(-ζm*0.1, ζm*0.1))
+    contour!(ax2,x, z, f'; levels = [0.5], color = (:black, 0.75), linewidth = 0.75)
+
+    skipz = 64
+    skipx = 16
+    
+    mag = maximum(sqrt.(U.^2 .+ V.^2))
+    U ./= mag
+    V ./= mag
+    arrows2d!(ax2, x[1:skipx:end], z[1:skipz:end], U[1:skipz:end, 1:skipx:end]', V[1:skipz:end, 1:skipx:end]', lengthscale=0.1)
+
+    # # -------------------------------------------------------------------
+    # # Colorbars
+    # # -------------------------------------------------------------------
+
+    # Colorbar(g1[1, 2], hm1, label = "Temperature θ", height = Relative(0.7), ticks=0.0:0.1:round(Tmax, digits=1) )
+    cb2=Colorbar(g1[4, 2], colormap=reverse(ColorSchemes.ice), colorrange=(0.0, 0.2), ticks=[0.0, 0.1, 0.2], valign=:bottom, height = Relative(0.7) )
+    cb =Colorbar(g1[3, 2], colormap=ColorSchemes.seaborn_rocket_gradient, colorrange=(0.2, Tmax), valign=:bottom, 
+                 ticks=0.2:round((Tmax-0.2)/3, digits=2):round(Tmax,digits=1))
+    # Colorbar(g1[5:6, 2], hm2, label = "Vorticity", height = Relative(0.7) )
+
+    cb.alignmode = Mixed(top = 4)
+    cb2.alignmode = Mixed(bottom = 4)
+    cbar_label = Label(g1[4:3, 2, Right()], "Temperature θ", rotation = pi/2, padding=(25, 0, 0, 0))
+
+    
+    
+    save_name = @sprintf("./plots/%s_%03d_s%02d_%04d_avg.png", suite, N, s, itr)
+    save( save_name, fig, px_per_unit=4)
+    # save_name = @sprintf("./plots/%s_%03d_s%02d_%04d.pdf", suite, N, s, itr)
+    # save( save_name, fig, px_per_unit=4)
+
 
     return data, fig
 end
@@ -522,7 +727,7 @@ function plot_animation(suite, N, itrs;
 
     hm1 = heatmap!( ax1, x, z, T_plot, colormap = cmap, colorrange = temp_lim, rasterize = true)
 
-    contour!( ax1, x, z, T_plot; levels = 0.2:(Tmax - 0.2)/7:Tmax, color = (:black, 0.75), linewidth = 0.3)
+    # contour!( ax1, x, z, T_plot; levels = 0.2:(Tmax - 0.2)/7:Tmax, color = (:black, 0.75), linewidth = 0.3)
 
     # f = 0.5 contour
     contour!( ax1, x, z, f_plot; levels = [0.5], color = (:white, 0.75), linewidth = 0.5)
