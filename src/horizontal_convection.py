@@ -350,7 +350,9 @@ def run_horizontal_conv_sim(params):
     # ---------------------------------------------------------------------------------
 
     # domain top
-    problem.add_equation("T(z=Lz) = 0")
+    if phase: problem.add_equation("T(z=Lz) = 0")
+    else: problem.add_equation("T(z=Lz) = Tm")
+
     problem.add_equation("u(z=Lz) = 0")
     if phase: problem.add_equation("f(z=Lz) = 1")
     
