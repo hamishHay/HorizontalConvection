@@ -10,6 +10,7 @@ import glob
 import h5py
 from diagnostics import array_diff_1D, array_mult, array_diff_2D, ice_ocean_interface_extract
 from mpi4py import MPI
+from remap import compute_streamfunction
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
@@ -41,6 +42,7 @@ def run_horizontal_conv_sim(params):
     diagnostics = True
 
     phase = params['phase on']
+    remap_soln = True
     # Numerical parameters
     nx, nz =     params['nx'], params['nz']
     timestep =   params['timestep']
@@ -410,10 +412,32 @@ def run_horizontal_conv_sim(params):
     u.change_scales(1)
     T.change_scales(1)
 
-    if isinstance(restart,str):
+    if restart == "mapped":
+        from remap import load_mapped_initial_condition
+        
+        ux_local, uz_local, T_local, z0_local = load_mapped_initial_condition(
+            params['mapped_ic_file'], dist, coords, xbasis, zbasis, x, z,
+        )
+
+        u.change_scales(1); T.change_scales(1)
+        u['g'][0] = ux_local
+        u['g'][1] = uz_local
+        T['g'] = T_local
+
+        if phase:
+            f.change_scales(1)
+            mask = lambda zz: 0.5*(1 + np.tanh(zz/(2*ϵ)))
+            f['g'] = mask(z - z0_local[:, None])
+
+            # apply the (1-f) velocity mask AFTER differentiating, same as before
+            u['g'][0] *= (1 - f['g'])
+            u['g'][1] *= (1 - f['g'])
+
+    elif isinstance(restart,str):
         write, initial_timestep = solver.load_state(restart, allow_missing=True)
         file_handler_mode = 'append'
         solver.stop_sim_time += stop_sim_time
+
     elif restart == 0:
         u['g'] = 0
         T.fill_random('g', seed=42, distribution='normal', scale=2e-4) # Random noise
@@ -433,10 +457,8 @@ def run_horizontal_conv_sim(params):
         load_file = f'{params["save_dir"]}/chkp/chkp_s' + str(restart) + ".h5"
         write, initial_timestep = solver.load_state(load_file)
         file_handler_mode = 'append'
-        # solver.stop_sim_time += stop_sim_time
         
     
-    # print("Here")
     # ---------------------------------------------------------------------------------
     # ----------------- Setup checkpoint and diagnostic tasks -------------------------
     # ---------------------------------------------------------------------------------
