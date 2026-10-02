@@ -67,7 +67,7 @@ def differentiate_psi(psi_new_array, coords, xbasis, zbasis_new, dist):
 def build_initial_condition(no_ice_checkpoint, no_ice_diags_dir,
                              Lx, Lz, nx, nz, Tm, eps, dealias=3/2,
                              T_top=0.0, h_min=0.02, smooth_frac=1/8,
-                             n_last=3, out_file='initial_condition_mapped.h5'):
+                             n_last=3, out_file='initial_condition_mapped'):
 
     Lz_old = Lz - Tm
 
@@ -120,7 +120,7 @@ def build_initial_condition(no_ice_checkpoint, no_ice_diags_dir,
     ux_new *= (1 - f_new)
     uz_new *= (1 - f_new)
 
-    with h5py.File(out_file, 'w') as h5f:
+    with h5py.File(out_file + ".h5", 'w') as h5f:
         h5f.create_dataset('psi', data=psi_new)        # (nx_ref, nz_ref) — NOT differentiated
         h5f.create_dataset('T', data=T_new)
         h5f.create_dataset('z0_x', data=z0_x.squeeze())
@@ -132,7 +132,7 @@ def build_initial_condition(no_ice_checkpoint, no_ice_diags_dir,
     print(f"Wrote {out_file}  (Lz_old={Lz_old:.4f})")
 
 
-    fig, (ax1, ax2, ax3) = plt.subplots(ncols=1, nrows=3, figsize=(8,15))
+    fig, (ax1, ax2, ax3) = plt.subplots(ncols=3, nrows=1, figsize=(15,2))
     # c1 = ax1.contourf(np.squeeze(x), np.squeeze(z_full), psi_full.T)
     c1 = ax1.contourf(np.squeeze(x), np.squeeze(z_old), T['g'].T, levels=np.linspace(0, np.amax(T['g']), 11))
     ax1.contour(np.squeeze(x), np.squeeze(z_old), T['g'].T, levels=[0.2], colors='w')
@@ -141,19 +141,19 @@ def build_initial_condition(no_ice_checkpoint, no_ice_diags_dir,
 
     print(np.shape(ux_new))
 
-    plt.colorbar(c1)
+    plt.colorbar(c1, orientation="horizontal")
     # c2 = ax2.contourf(np.squeeze(x), np.squeeze(z_new), psi_new.T)
     c2 = ax2.contourf(np.squeeze(x), np.squeeze(z_new), T_new.T, levels=np.linspace(0, np.amax(T['g']), 11))
     ax2.axhline(0.8, color="r", linewidth=0.5)
     ax2.contour(np.squeeze(x), np.squeeze(z_new), T_new.T, levels=[0.2], colors='w', linewidths=0.4)
     
-    plt.colorbar(c2)
+    plt.colorbar(c2, orientation="horizontal")
     ax1.set_aspect("equal")
     ax2.set_aspect("equal")
 
     ax3.plot(x, h_x)
     
-    fig.savefig("remapped_conditions.png", dpi=400, bbox_inches="tight")
+    fig.savefig(out_file + ".png", dpi=400, bbox_inches="tight")
 
     return out_file
 

@@ -123,10 +123,7 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
             phase ? f = data["tasks/phase"][:, :, itr:itr2] : f = nothing
             T = data["tasks/temperature"][:, :, itr:itr2]
             qn = nothing
-            try
-                phase ? qn = data["tasks/heat flux interface"][1, :, itr:itr2] : qn = nothing
-            catch e 
-            end
+            
 
 
             d["U"]=U 
@@ -137,7 +134,7 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
             d["x"]=x
             d["z"]=z
             d["t"]=t
-            d["qn"]=qn
+            
         end
 
         dfile_num = latest_snapshot_file(suite, N, "snaps")
@@ -167,6 +164,12 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
                     
                     d["qt"] = F
                     d["fx"] = fx
+                    try
+                        phase ? qn = data["tasks/heat flux interface"][1, :, itr:itr2] : qn = nothing
+                        d["qn"]=qn
+                    catch e 
+                        d["qn"] = nothing 
+                    end
 
                     found = true
                 end 
@@ -188,6 +191,7 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
             KE_ice = []
             vol_liq = []
             avg_heat_flux = []
+            heat_flux_x = []
             times = []
             for sim_file in files
                 h5open(sim_file, "r") do data
@@ -206,6 +210,11 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
                     # end
                     # println(size(mean(data["tasks/heat flux top x"][1, :, :], dims=1)))
                     push!(avg_heat_flux, mean(data["tasks/heat flux top x"][1, :, :], dims=1)[1,:])
+                    if phase
+                        push!(heat_flux_x, data["tasks/heat flux interface"][1, :, :])
+                    else
+                        push!(heat_flux_x, data["tasks/heat flux top x"][1, :, :])
+                    end
                         
                 end
             end
@@ -214,6 +223,7 @@ function get_snapshot(suite, N, itr; itr2=nothing, no_series = false, dfile_num=
             d["vol liq"] = vol_liq
             d["times"] = times
             d["avg heat flux"] = avg_heat_flux
+            d["heat flux x"] = heat_flux_x
         end
 
 
@@ -289,7 +299,7 @@ function join_colormaps(cmap1, cmap2, xmid; xmin=0, xmax=1, n=1024)
     return vcat(c1, c2)
 end
 
-function plot_latest(suite, N, itr; s=nothing, phase=true)
+function plot_latest(suite, N, itr; s=nothing, phase=true,skipz=64, skipx=16,arrows_on=false, flux_cap=0.5)
 
     # # -------------------------------------------------------------------
     # # Read parameters
@@ -338,10 +348,11 @@ function plot_latest(suite, N, itr; s=nothing, phase=true)
     # Figure
     # -------------------------------------------------------------------
 
-    fig = Figure( size = (1500 + (Lx[N+1] - 5)/5 * 500, 600) )
+    fig = Figure( size = (1500 + (Lx[N+1] - 5)/5 * 500, 800) )
 
     g1 = fig[1:3, 1] = GridLayout()
     g2 = fig[1:3, 2] = GridLayout()
+    g3 = fig[4, 1:2] = GridLayout()
 
     axTop = Axis(g1[1,1], ylabel = "Heat flux", xticksvisible=false, xticklabelsvisible=false, xminorgridvisible=true, xminorticks=IntervalsBetween(4))
     axMid = Axis(g1[2,1], ylabel = "Ice thickness", xticksvisible=false, xticklabelsvisible=false, xminorgridvisible=true, xminorticks=IntervalsBetween(4))
@@ -349,6 +360,8 @@ function plot_latest(suite, N, itr; s=nothing, phase=true)
     ax1 = Axis(g1[3:4, 1], aspect = DataAspect(), ylabel = L"$z$", xticksvisible=false, xticklabelsvisible=false)
 
     ax2 = Axis(g1[5:6, 1], aspect = DataAspect(), xlabel = L"$x$", ylabel = L"$z$", xminorticksvisible=true, xminorticks=IntervalsBetween(4))
+
+    ax_sp_time = Axis(g3[1,1])
 
     ax_lke = Axis(g2[1,1], ylabel="Liquid KE", xticklabelsvisible=false, yscale=log10)
     ax_ratio = Axis(g2[2,1], ylabel="Ice--Liquid\nKE ratio", xticklabelsvisible=false, yscale=log10)
@@ -389,15 +402,13 @@ function plot_latest(suite, N, itr; s=nothing, phase=true)
     if !isnothing(f)
         contour!(ax2,x, z, f'; levels = [0.5], color = (:black, 0.75), linewidth = 0.75)
     end
-
-    skipz = 64
-    skipx = 16
     
-    mag = maximum(sqrt.(U.^2 .+ V.^2))
-    U ./= mag
-    V ./= mag
-    arrows2d!(ax2, x[1:skipx:end], z[1:skipz:end], U[1:skipz:end, 1:skipx:end]', V[1:skipz:end, 1:skipx:end]', lengthscale=0.1)
-
+    if arrows_on
+        mag = maximum(sqrt.(U.^2 .+ V.^2))
+        U ./= mag
+        V ./= mag
+        arrows2d!(ax2, x[1:skipx:end], z[1:skipz:end], U[1:skipz:end, 1:skipx:end]', V[1:skipz:end, 1:skipx:end]', lengthscale=0.1)
+    end
     # # -------------------------------------------------------------------
     # # Colorbars
     # # -------------------------------------------------------------------
@@ -418,8 +429,13 @@ function plot_latest(suite, N, itr; s=nothing, phase=true)
     vol_liq = data["vol liq"]
     avg_heat_flux = data["avg heat flux"]
     times = data["times"]
+    heat_flux_x = data["heat flux x"]
+    
+    heat_flux_x_max = flux_cap*minimum([minimum(i) for i in heat_flux_x])
+    cb3 =Colorbar(g3[1, 2], colormap=reverse(ColorSchemes.seaborn_rocket_gradient), colorrange=(heat_flux_x_max, 0), valign=:bottom)
 
     for i in eachindex(KE_liq)
+        image!(ax_sp_time, extrema(times[i]), extrema(x), heat_flux_x[i]', colorrange=(heat_flux_x_max, 0),colormap=reverse(ColorSchemes.seaborn_rocket_gradient), interpolate=false)
         
         lines!(ax_lke, times[i], KE_liq[i])
         if !isempty(KE_ice)
