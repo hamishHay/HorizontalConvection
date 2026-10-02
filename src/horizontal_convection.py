@@ -130,7 +130,7 @@ def run_horizontal_conv_sim(params):
     if phase:
         f = dist.Field(name='f', bases=(xbasis,zbasis))
         ft = dist.Field(name='ft', bases=(xbasis,zbasis))
-        variables += [f, ft]
+        # variables += [f, ft]
 
     # ---------------------------------------------------------------------------------
     # ------------------------- diagnostic quantities ---------------------------------
@@ -315,7 +315,7 @@ def run_horizontal_conv_sim(params):
         tau_f2 = dist.Field(name='tau_f2', bases=xbasis)
         tau_phas_eq = -γ*dz(lift(tau_f1)) + lift(tau_f2)
 
-        tau_terms += [tau_f1, tau_f2]
+        # tau_terms += [tau_f1, tau_f2]
 
 
     # simpler reformulation of the tau terms
@@ -337,9 +337,9 @@ def run_horizontal_conv_sim(params):
     problem.add_equation("div(u) + tau_div_eq = 0")
 
     if phase:
-        problem.add_equation("dt(f) - ft = 0")
-        problem.add_equation("(5/6)*S*dt(f) - γ*div(grad(f))        + tau_phas_eq = -ϵ**(-2)*f*(1-f)*(γ*(1-2*f) + (T-Tm-a*(zf-z0)))")
-        problem.add_equation("dt(T) - div(grad(T)) - S*dt(f)              + tau_temp_eq = - (1-f*adv)*u@grad(T) + T*u@grad(f)*adv")
+        # problem.add_equation("dt(f) - ft = 0")
+        # problem.add_equation("(5/6)*S*dt(f) - γ*div(grad(f))        + tau_phas_eq = -ϵ**(-2)*f*(1-f)*(γ*(1-2*f) + (T-Tm-a*(zf-z0)))")
+        problem.add_equation("dt(T) - div(grad(T))            + tau_temp_eq = - (1-f*adv)*u@grad(T) + T*u@grad(f)*adv")
         problem.add_equation("dt(u)/Pr - div(grad(u)) + grad(p) -Ra*T*ez + tau_mom_eq  = - u@grad(u)/Pr - (1/(ϵ*β)**2)*f*u")
     else:
         problem.add_equation("dt(T) - div(grad(T))               + tau_temp_eq = - u@grad(T)")
@@ -354,13 +354,13 @@ def run_horizontal_conv_sim(params):
     else: problem.add_equation("T(z=Lz) = Tm")
 
     problem.add_equation("u(z=Lz) = 0")
-    if phase: problem.add_equation("f(z=Lz) = 1")
+    # if phase: problem.add_equation("f(z=Lz) = 1")
     
     # domain bottom
     # problem.add_equation("T(z=0) = T_bot")
     problem.add_equation("dz(T)(z=0) = F_bot")
     problem.add_equation("u(z=0) = 0")
-    if phase: problem.add_equation("f(z=0) = 0")
+    # if phase: problem.add_equation("f(z=0) = 0")
 
     problem.add_equation("integ(p) = 0") # Pressure gauge
 
@@ -388,7 +388,8 @@ def run_horizontal_conv_sim(params):
 
         problem.add_equation("dt(avg_u) - u = 0")
         problem.add_equation("dt(avg_T) - T = 0")
-        if phase: problem.add_equation("dt(avg_f) - f = 0")
+        # if phase: problem.add_equation("dt(avg_f) - f = 0")
+        if phase: problem.add_equation("dt(avg_f) = f")
 
         problem.add_equation("dt(avg_dTdz_out) = Average(S2(dz(T), mask_edges), 'x')" )
         problem.add_equation("dt(avg_dTdz_in) =  Average(S2(dz(T), mask_center), 'x')" )
