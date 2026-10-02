@@ -478,7 +478,6 @@ def run_horizontal_conv_sim(params):
     snapshots.add_task(T, name='temperature')
     if phase: 
         snapshots.add_task(f, name='phase')
-        snapshots.add_task(q_interface, name='heat flux interface')
         snapshots.add_task(grad_phi_mag, name='phase grad mag')
 
     # 0D and 1D snapshots of space-integral quantities
@@ -491,6 +490,7 @@ def run_horizontal_conv_sim(params):
         snapshots_integ.add_task(V_liq,         name='vol liq')
         snapshots_integ.add_task(KE_ice,        name='KE ice')
         snapshots_integ.add_task(KE_liq,        name='KE liq')
+        snapshots_integ.add_task(q_interface, name='heat flux interface')
         # snapshots_integ.add_task(S1(d3.grad(T),  f,  domain=domain1D, 
         #                          F=ice_ocean_interface_extract, ten=(coords,)),     
         #                          name='grad(T) ice-ocean')
