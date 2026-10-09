@@ -18,7 +18,8 @@ import matplotlib.pyplot as plt
 
 from remap import (compute_streamfunction, ice_thickness_from_flux,
                     load_time_avg_heat_flux_top,
-                    remap_piecewise_interface)
+                    remap_piecewise_interface, center_profile_max,
+                    roll_x_to_match)
 
 def build_old_domain_fields(u, T, coords, xbasis, zbasis_old, dist,
                              Lz_old, Lz, Tm, T_ice_top=0.0, nz_ice=None):
@@ -67,7 +68,8 @@ def differentiate_psi(psi_new_array, coords, xbasis, zbasis_new, dist):
 def build_initial_condition(no_ice_checkpoint, no_ice_diags_dir,
                              Lx, Lz, nx, nz, Tm, eps, dealias=3/2,
                              T_top=0.0, h_min=0.02, smooth_frac=1/8,
-                             n_last=3, out_file='initial_condition_mapped'):
+                             n_last=3, n_end=None, out_file='initial_condition_mapped',
+                             center_flux_max=False):
 
     Lz_old = Lz - Tm
 
@@ -93,7 +95,13 @@ def build_initial_condition(no_ice_checkpoint, no_ice_diags_dir,
         u, T, coords, xbasis, zbasis_old, dist, Lz_old, Lz, Tm, T_ice_top=T_top,
     )
 
-    F_x = load_time_avg_heat_flux_top(no_ice_diags_dir, n_last=n_last)
+    F_x = load_time_avg_heat_flux_top(no_ice_diags_dir, n_last=n_last, n_end=n_end)
+
+    if center_flux_max:
+        F_x, shift_F = center_profile_max(F_x, smooth_modes=int(len(F_x) * smooth_frac))
+        shift_nx, (psi_full, T_full) = roll_x_to_match(shift_F, len(F_x), psi_full, T_full)
+        print(f"Rolled flux by {shift_F} pts, flow/temperature by {shift_nx} pts "
+            f"(max flux now at Lx/2)")
 
     _, z0_x = ice_thickness_from_flux(
         F_x, Lz, Tm, T_top=T_top, h_min=h_min,

@@ -2,22 +2,49 @@
 """
 Command-line wrapper around build_initial_condition.
 
+Assumes the standard run layout, where chkp/ and diags/ are both
+subdirectories of one run directory:
+
+    <run_dir>/chkp/chkp_s*.h5
+    <run_dir>/diags/diags_s*.h5
+
+The last checkpoint (by simulation-write number) is used automatically.
+
 Example (equivalent to the previous hardcoded call):
 
     python run_build_initial_condition.py \
-        /home/hcfch1/scratch/HorizontalConvection/lcl/A5_Ra8_no_phase/data/Ra8/000/chkp/chkp_s210.h5 \
-        /home/hcfch1/scratch/HorizontalConvection/lcl/A5_Ra8_no_phase/data/Ra8/000/diags/ \
+        /home/hcfch1/scratch/HorizontalConvection/lcl/A5_Ra8_no_phase/data/Ra8/000 \
         --Lx 5 --Lz 1 --nx 512 --nz 1024 --Tm 0.2 --eps 2e-3 \
         --smooth_frac 0.0390625 \
         --n_last 40
 
-Only the two file paths are required; every physical/numerical parameter
+Only the run directory is required; every physical/numerical parameter
 below has a default and can be overridden individually.
 """
-import sys 
-sys.path.append("/home/hcfch1/scratch/HorizontalConvection/src/")
 import argparse
+import glob
+import os
+import re
 from build_remapped_initial_condition import build_initial_condition
+
+
+def find_last_checkpoint(run_dir):
+    """
+    Return the path to the highest-numbered chkp_s*.h5 file under
+    <run_dir>/chkp/. Sorts numerically on the trailing write number
+    rather than lexicographically, so e.g. chkp_s9.h5 vs chkp_s10.h5
+    is handled correctly.
+    """
+    chkp_dir = os.path.join(run_dir, 'chkp')
+    candidates = glob.glob(os.path.join(chkp_dir, 'chkp_s*.h5'))
+    if not candidates:
+        raise FileNotFoundError(f"No chkp_s*.h5 files found in {chkp_dir}")
+
+    def write_number(path):
+        match = re.search(r'chkp_s(\d+)\.h5$', os.path.basename(path))
+        return int(match.group(1)) if match else -1
+
+    return max(candidates, key=write_number)
 
 
 def parse_args():
@@ -26,12 +53,10 @@ def parse_args():
                     "phase-field ice run from an equilibrated no-ice checkpoint."
     )
 
-    # Required positional args: just the two file paths
-    parser.add_argument('no_ice_checkpoint', type=str,
-                        help="Path to the no-ice run's checkpoint .h5 file")
-    parser.add_argument('no_ice_diags_dir', type=str,
-                        help="Path to the no-ice run's diags directory "
-                             "(for the time-averaged top heat flux)")
+    # Required positional arg: the run directory (contains chkp/ and diags/)
+    parser.add_argument('run_dir', type=str,
+                        help="Path to the no-ice run directory, containing "
+                             "chkp/ and diags/ subdirectories")
 
     # Everything else is optional, with sensible defaults
     parser.add_argument('--Lx', type=float, default=5.0,
@@ -59,10 +84,15 @@ def parse_args():
     parser.add_argument('--n_last', type=int, default=3,
                         help="Number of trailing time-averaged flux writes "
                              "to average together (default: 3)")
+    parser.add_argument('--n_end', type=int, default=3,
+                        help="Number of trailing time-averaged flux writes "
+                             "to average together (default: 3)")
+    parser.add_argument('--center_flux_max', type=int, default=0,
+                        help="Center the heat flux at domain middle")
     parser.add_argument('--out_file', type=str,
-                        default='initial_condition_mapped',
-                        help="Output filename (do not append with .h5) "
-                             "(default: initial_condition_mapped)")
+                        default='initial_condition_mapped.h5',
+                        help="Output .h5 filename "
+                             "(default: initial_condition_mapped.h5)")
 
     return parser.parse_args()
 
@@ -70,9 +100,14 @@ def parse_args():
 def main():
     args = parse_args()
 
+    no_ice_checkpoint = find_last_checkpoint(args.run_dir)
+    no_ice_diags_dir = os.path.join(args.run_dir, 'diags')
+    print(f"Using checkpoint: {no_ice_checkpoint}")
+    print(f"Using diags dir:  {no_ice_diags_dir}")
+
     build_initial_condition(
-        args.no_ice_checkpoint,
-        args.no_ice_diags_dir,
+        no_ice_checkpoint,
+        no_ice_diags_dir,
         Lx=args.Lx,
         Lz=args.Lz,
         nx=args.nx,
@@ -84,7 +119,9 @@ def main():
         h_min=args.h_min,
         smooth_frac=args.smooth_frac,
         n_last=args.n_last,
+        n_end=args.n_end,
         out_file=args.out_file,
+        center_flux_max=args.center_flux_max
     )
 
 
