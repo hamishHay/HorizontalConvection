@@ -91,7 +91,39 @@ def ice_thickness_from_flux(F_x, Lz, Tm, T_top=0.0, h_min=0.02, h_max=None,
 
     return h_x, z0_x
 
-def load_time_avg_heat_flux_top(diags_dir, n_last=50):
+def center_profile_max(F_x, smooth_modes=None):
+    """
+    Periodically roll a 1D x-profile so its maximum lands at the middle
+    of the domain. Returns (F_shifted, shift), where shift is the integer
+    number of grid points rolled (positive = toward +x).
+
+    The argmax is located on a low-passed copy (keeping `smooth_modes`
+    Fourier modes) so one noisy column can't set the shift; the roll
+    itself is applied to the original, unsmoothed profile.
+    """
+    F_x = np.asarray(F_x).squeeze()
+    n = F_x.size
+
+    F_for_max = F_x
+    if smooth_modes is not None:
+        coeffs = np.fft.rfft(F_x)
+        coeffs[smooth_modes + 1:] = 0
+        F_for_max = np.fft.irfft(coeffs, n=n)
+
+    shift = n // 2 - int(np.argmin(F_for_max))
+    return np.roll(F_x, shift), shift
+
+def roll_x_to_match(shift_F, n_F, *fields):
+    """
+    Roll fields (axis 0 = x) by the same *physical* distance as a shift of
+    shift_F points on an n_F-point profile. This matters when the flux array
+    (saved at dealias scale) has a different length from the field grid.
+    """
+    nx = fields[0].shape[0]
+    shift_nx = int(round(shift_F * nx / n_F))
+    return shift_nx, tuple(np.roll(f, shift_nx, axis=0) for f in fields)
+
+def load_time_avg_heat_flux_top(diags_dir, n_last=50, n_end=None):
     """
     Read the 'heat flux top avg x' task from the no-ice run's tavg_integ
     file handler (params['save_dir']/diags/*.h5) and return the profile
@@ -116,7 +148,10 @@ def load_time_avg_heat_flux_top(diags_dir, n_last=50):
         key = [k for k in h5f['tasks'].keys()
                 if 'heat flux top avg x' in k][0]
         data = h5f['tasks'][key][()]   # shape (n_writes, nx, 1) typically
-        F_x = np.mean(data[-n_last:, :, 0], axis=0)
+        if n_end is None:
+            n_end = np.shape(data)[0]
+        print("Getting time average from", n_last, "to", n_end)
+        F_x = np.mean(data[n_last:n_end, :, 0], axis=0)
 
 
     print("Mean flux is ", np.mean(F_x))
