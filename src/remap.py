@@ -57,9 +57,11 @@ def ice_thickness_from_flux(F_x, Lz, Tm, T_top=0.0, h_min=0.02, h_max=None,
     """
     F_x = np.maximum(np.abs(F_x), 1e-8)
 
+    print(F_x)
+
     Fmean = np.mean(F_x)
     Fpert = F_x - Fmean
-    Fpert *= 0.85   # Apply scaling factor to reduce ice thickness variations
+    Fpert *= 0.9   # Apply scaling factor to reduce ice thickness variations
                     # which seems to help with 2D effects
     F_x = Fmean + Fpert
 
@@ -70,13 +72,17 @@ def ice_thickness_from_flux(F_x, Lz, Tm, T_top=0.0, h_min=0.02, h_max=None,
     Hmean = (Tm - T_top) * Bmean
     Hpert = (Tm - T_top) * Bpert 
 
-    h_x = Hmean + Hpert
+    h_x = (Tm - T_top) / F_x   #Hmean + Hpert
+
+    print(h_x)
+
+    # h_x *= (1-np.exp(-(0.9 - h_x)/0.01))
 
     print("Average ice thickness is", Hmean)
 
-    if h_max is None:
-        h_max = 0.9 * Lz
-    h_x = np.clip(h_x, h_min, h_max)
+    # if h_max is None:
+    #     h_max = 0.9 * Lz
+    # h_x = np.clip(h_x, h_min, h_max)
 
     if smooth_modes is not None:
         assert dist is not None and xbasis is not None
@@ -85,7 +91,8 @@ def ice_thickness_from_flux(F_x, Lz, Tm, T_top=0.0, h_min=0.02, h_max=None,
         h_field['g'][:,0] = h_x
         h_field['c'][smooth_modes:] = 0
         h_field.change_scales(1)
-        h_x = np.clip(h_field['g'].copy(), h_min, h_max)
+        # h_x = np.clip(h_field['g'].copy(), h_min, h_max)
+        h_x = h_field['g'].copy()
 
     z0_x = Lz - h_x
 
