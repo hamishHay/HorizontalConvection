@@ -299,7 +299,7 @@ function join_colormaps(cmap1, cmap2, xmid; xmin=0, xmax=1, n=1024)
     return vcat(c1, c2)
 end
 
-function plot_latest(suite, N, itr; s=nothing, phase=true,skipz=64, skipx=16,arrows_on=false, flux_cap=0.5)
+function plot_latest(suite, N, itr; s=nothing, phase=true,skipz=64, skipx=16,arrows_on=false, flux_cap=0.5, add_remap=nothing)
 
     # # -------------------------------------------------------------------
     # # Read parameters
@@ -394,7 +394,7 @@ function plot_latest(suite, N, itr; s=nothing, phase=true,skipz=64, skipx=16,arr
 
     # f = 0.5 contourd
     if !isnothing(f) 
-        contour!(ax1,x, z, f'; levels = [0.5], color = (:white, 0.75), linewidth = 0.5)
+        contour!(ax1,x, z, f'; levels = [0.5], color = (:white, 0.75), linewidth = 0.75)
     end
 
     hm2 = heatmap!(ax2, x, z, ζ'; colormap = :coolwarm, rasterize=true, colorrange=(-ζm*0.1, ζm*0.1))
@@ -479,6 +479,18 @@ function plot_latest(suite, N, itr; s=nothing, phase=true,skipz=64, skipx=16,arr
     colsize!(fig.layout, 2, 450)
 
     # ax2.alignmode = Mixed(bottom = 0)
+
+    if !isnothing(add_remap)
+        h5open(add_remap, "r") do data
+            old_pos = data["z0_x"][:]
+            old_x   = data["x_ref"][:]
+
+            lines!(ax1, old_x, old_pos, color=:white, linestyle=:dash, linewidth=0.75)
+            lines!(ax2, old_x, old_pos, color=:black, linestyle=:dash, linewidth=0.75)
+
+        end
+
+    end
     
     
     save_name = @sprintf("./plots/%s_%03d_s%02d_%04d.png", suite, N, s, itr)

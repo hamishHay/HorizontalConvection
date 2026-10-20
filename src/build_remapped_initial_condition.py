@@ -159,7 +159,8 @@ def build_initial_condition(no_ice_checkpoint, no_ice_diags_dir,
     ax1.set_aspect("equal")
     ax2.set_aspect("equal")
 
-    ax3.plot(x, h_x)
+    ax3.plot(x, F_x)
+    print(np.amax(F_x))
     
     fig.savefig(out_file + ".png", dpi=400, bbox_inches="tight")
 
