@@ -142,7 +142,7 @@ def build_initial_condition(no_ice_checkpoint, no_ice_diags_dir,
 
     fig, (ax1, ax2, ax3) = plt.subplots(ncols=3, nrows=1, figsize=(15,2))
     # c1 = ax1.contourf(np.squeeze(x), np.squeeze(z_full), psi_full.T)
-    c1 = ax1.contourf(np.squeeze(x), np.squeeze(z_old), T['g'].T, levels=np.linspace(0, np.amax(T['g']), 11))
+    c1 = ax1.contourf(np.squeeze(x), np.squeeze(z_old), T['g'].T, levels=np.linspace(np.amin(T['g']), np.amax(T['g']), 11))
     ax1.contour(np.squeeze(x), np.squeeze(z_old), T['g'].T, levels=[0.2], colors='w')
 
     print(np.amin(T['g']))
@@ -151,7 +151,7 @@ def build_initial_condition(no_ice_checkpoint, no_ice_diags_dir,
 
     plt.colorbar(c1, orientation="horizontal")
     # c2 = ax2.contourf(np.squeeze(x), np.squeeze(z_new), psi_new.T)
-    c2 = ax2.contourf(np.squeeze(x), np.squeeze(z_new), T_new.T, levels=np.linspace(0, np.amax(T['g']), 11))
+    c2 = ax2.contourf(np.squeeze(x), np.squeeze(z_new), T_new.T, levels=np.linspace(np.amin(T['g']), np.amax(T['g']), 11))
     ax2.axhline(0.8, color="r", linewidth=0.5)
     ax2.contour(np.squeeze(x), np.squeeze(z_new), T_new.T, levels=[0.2], colors='w', linewidths=0.4)
     

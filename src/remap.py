@@ -94,6 +94,8 @@ def ice_thickness_from_flux(F_x, Lz, Tm, T_top=0.0, h_min=0.02, h_max=None,
         # h_x = np.clip(h_field['g'].copy(), h_min, h_max)
         h_x = h_field['g'].copy()
 
+    h_x[:] = 0.2
+
     z0_x = Lz - h_x
 
     return h_x, z0_x
@@ -157,6 +159,7 @@ def load_time_avg_heat_flux_top(diags_dir, n_last=50, n_end=None):
         data = h5f['tasks'][key][()]   # shape (n_writes, nx, 1) typically
         if n_end is None:
             n_end = np.shape(data)[0]
+        print("Last time-average output is", n_end)
         print("Getting time average from", n_last, "to", n_end)
         F_x = np.mean(data[n_last:n_end, :, 0], axis=0)
 
